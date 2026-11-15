@@ -1,0 +1,29 @@
+{
+  "python": "3.10.4",
+  "platform": "macOS-26.3.1-x86_64-i386-64bit",
+  "packages": {
+    "numpy": "1.23.4",
+    "scipy": "1.8.1",
+    "scikit-learn": "1.1.3",
+    "matplotlib": "3.6.2",
+    "joblib": "1.2.0",
+    "threadpoolctl": "3.1.0"
+  },
+  "arguments": {
+    "reps": 25,
+    "train": 650,
+    "test": 360,
+    "trees": 180,
+    "features": 48,
+    "min_leaf": 12,
+    "seed": 7606242,
+    "jobs": 2,
+    "quadrature": 4096,
+    "output": "results"
+  },
+  "source_sha256": {
+    "ST6242_DRF_full_forest_experiment.py": "5f99dd605bbf471e8fb8e0842d36cdb469a683b5d0b9149d07fbc48cffc21064",
+    "drf_core.py": "487eec82193bfa044460c070540d844cc1aa5c3760f8e805e6315326cabeadab"
+  },
+  "provenance": "New implementation of the draft's stated designs; original scripts were unavailable."
+}

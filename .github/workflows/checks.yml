@@ -1,0 +1,17 @@
+name: Numerical checks
+on: [push, pull_request]
+permissions:
+  contents: read
+jobs:
+  checks:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+          cache: pip
+      - run: python -m pip install -r requirements.txt
+      - run: python -m unittest discover -s tests -v
+      - run: python ST6242_DRF_extended_experiment.py --reps 3 --bandwidth-reps 3 --output /tmp/drf-root-smoke
+      - run: python ST6242_DRF_full_forest_experiment.py --reps 2 --train 80 --test 20 --trees 5 --features 8 --min-leaf 5 --output /tmp/drf-forest-smoke

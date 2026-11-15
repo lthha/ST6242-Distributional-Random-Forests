@@ -1,0 +1,718 @@
+\documentclass[12pt,a4paper]{article}
+\usepackage[T1]{fontenc}
+\usepackage[utf8]{inputenc}
+\usepackage{lmodern}
+\usepackage[a4paper,margin=1in]{geometry}
+\usepackage{amsmath,amssymb,amsthm,mathtools,bm}
+\usepackage{booktabs,array,tabularx,multirow}
+\newcolumntype{Y}{>{\raggedright\arraybackslash}X}
+\usepackage{graphicx}
+\usepackage{enumitem} 
+\usepackage{microtype}
+\usepackage{hyperref}
+\usepackage{listings}
+\usepackage{xcolor}
+\usepackage{caption}
+\hypersetup{colorlinks=true,linkcolor=blue!60!black,citecolor=blue!60!black,urlcolor=blue!60!black,
+  pdftitle={Distributional Random Forests: Estimation, Inference, and Distributional Heterogeneity}}
+% \setlength{\parindent}{0pt}
+% \setlength{\parskip}{5pt}
+\setlist[itemize]{topsep=2pt,itemsep=1pt} 
+\setlist[enumerate]{topsep=2pt,itemsep=1pt}
+\newtheorem{proposition}{Proposition}
+\newtheorem{remark}{Remark}
+\newtheorem{lemma}{Lemma}
+\newcommand{\E}{\mathbb E}
+\newcommand{\Pp}{\mathbb P}
+\newcommand{\R}{\mathbb R}
+\newcommand{\calH}{\mathcal H}
+\newcommand{\calP}{\mathcal P}
+\newcommand{\MMD}{\operatorname{MMD}}
+\newcommand{\Var}{\operatorname{Var}}
+\newcommand{\Cov}{\operatorname{Cov}}
+\newcommand{\1}{\mathbf 1}
+\newcommand{\norm}[1]{\left\lVert#1\right\rVert}
+\newcommand{\ip}[2]{\left\langle#1,#2\right\rangle}
+\input{experiment_numbers.tex}
+\lstdefinestyle{pystyle}{basicstyle=\ttfamily\scriptsize,breaklines=true,showstringspaces=false,
+  frame=single,columns=fullflexible,keepspaces=true,keywordstyle=\color{blue!55!black},
+  commentstyle=\color{gray!75!black}}
+
+\title{\Large \textbf{Distributional Random Forests:}\\
+ Estimation, Inference, and Distributional Heterogeneity\\[4pt]
+ \large ST6242: Combinatorial Statistics and Machine Learning\\
+ \large Final Project Report}
+\author{\textit{Student name: Le Thi Hong Ha}}
+\date{November 2026}
+
+\begin{document}
+\maketitle
+
+\begin{abstract}
+Distributional random forests (DRF) use maximum mean discrepancy (MMD) to construct forest partitions sensitive to changes in conditional response distributions. We review the estimator, its reproducing kernel Hilbert space (RKHS) interpretation and consistency theory from \'{C}evid et al.\ (2022), together with the Gaussian limit and half-sampling inference developed by N\"af et al.\ (2023), and survey subsequent extensions. An independently worked example shows that a balanced population MMD split uniquely identifies a distributional change point even when the conditional means coincide. Root-split simulations compare regression CART, CART on squared responses, and exact MMD, and investigate Gaussian bandwidth sensitivity. Complete-forest experiments then examine variance, tail-shape, multimodality, and dependence changes. A random Fourier feature (RFF) approximation to MMD splitting improves estimation of conditional variance, a modality-sensitive probability, and conditional covariance across 25 replications per setting. The central probability in the tail-shape example favors mean-CART. Under the primary metric, conditional squared MMD, mean-CART has lower observed error in three of four settings; RFF--MMD has a smaller error in the dependence setting. Paired Monte Carlo errors quantify uncertainty in these comparisons. The experiments use fixed Fourier features and ordinary bootstrap trees, so the inferential guarantees for honest DRF do not apply to this implementation.
+\end{abstract}
+
+\section{Introduction}\label{sec:intro}
+Let $\mathcal D_n=\{(X_i,Y_i)\}_{i=1}^n$ be an independent and identically distributed sample, where $X_i\in\R^p$ is a covariate vector and $Y_i\in\R^d$ is a possibly multivariate response. The dimension of the covariates is $p$ and the response dimension is $d$. Many statistical analyses begin with the conditional mean $m(x)=\E[Y\mid X=x]$. Conditional laws with identical means can exhibit different variances, tail probabilities, dependence structures, and multimodality. Mean estimation can therefore conceal scientifically important distributional heterogeneity.
+
+The more general estimand is the conditional law $P_x:=\mathcal L(Y\mid X=x)$. A reliable estimate $\widehat P_x$ supports multiple statistical targets through a single fitted model. Examples include marginal conditional quantiles, tail probabilities, the conditional covariance matrix, and comparisons of conditional distributions across groups.
+
+\'{C}evid et al.\ \cite{cevid2022} propose \emph{distributional random forests} (DRF), whose split criterion compares the response distributions in prospective daughter nodes using MMD. The resulting random forest constructs data-adaptive, nonnegative weights and a weighted empirical conditional law. N\"af et al.\ \cite{naf2023} subsequently analyze the asymptotic distribution of this estimator and show how half-sampling can approximate sampling uncertainty.
+
+Our independent research questions concern the population identification properties of MMD splitting and the finite-sample accuracy of the resulting conditional distribution estimates. We first reconstruct the DRF algorithm and its RKHS interpretation, then review the consistency and inference theorems together with their assumptions and related work. The independent analysis establishes a population change-point result and evaluates the root-splitting mechanism. A second numerical study evaluates complete forests on four conditional distribution problems using conditional squared MMD and targeted distributional functionals. This two-stage investigation separates the analytical behavior of one split from the statistical performance of forest aggregation.
+
+The population calculation identifies a change point between distinct conditional laws even when the conditional mean is constant. In the root-split experiment, both MMD and CART on squared responses substantially reduce split error relative to CART on the original response. In complete forests, RFF--MMD improves three selected distributional functionals, while mean-CART has lower conditional squared MMD error in three of four settings. Thus the empirical benefit depends on the statistical target and the forest construction. The accompanying experiment code records individual replications and paired method contrasts; the simulation tables and figures are generated from the saved records.
+
+\section{Background: Forest Weights, Kernels, and MMD}\label{sec:background}
+\subsection{From regression forests to conditional distributions}
+A regression tree partitions the covariate space and predicts a query point $x\in\R^p$ by averaging training responses in the terminal leaf containing $x$. Consider a forest with $B\ge1$ trees, indexed by $b=1,\ldots,B$. Let $L_b(x)\subseteq\R^p$ denote the terminal-leaf region containing $x$ in tree $b$. Its training observations have indices $\{i:X_i\in L_b(x)\}$. The tree-specific weights $w_{bi}(x)$ and their forest averages are
+\begin{equation}\label{eq:treeweights}
+ w_{bi}(x)=\frac{\1\{X_i\in L_b(x)\}}{|\{j:X_j\in L_b(x)\}|},\qquad
+ \widehat w_{i,B}(x)=\frac{1}{B}\sum_{b=1}^{B}w_{bi}(x).
+\end{equation}
+For simplicity, \eqref{eq:treeweights} uses the full relevant estimation sample; subsampled or honest trees average over their designated estimation observations. The finite-forest weights $\widehat w_{i,B}(x)$ are nonnegative and sum to one whenever all prediction leaves are nonempty. Let $\mathcal T$ denote the random subsampling and tree-building procedure, and write $w_{\mathcal T,i}(x)$ for the corresponding tree weight. Its conditional expectation defines the \emph{infinite-forest} weight:
+\[
+ \widehat w_i(x)=\E_{\mathcal T}[w_{\mathcal T,i}(x)\mid\mathcal D_n],
+ \qquad \widehat w_{i,B}(x)\longrightarrow\widehat w_i(x)
+ \quad\text{as }B\to\infty,
+\]
+when trees are sampled independently conditional on $\mathcal D_n$. The asymptotic results reviewed in Section~\ref{sec:method} concern this idealized infinite forest. Its estimated conditional kernel mean embedding $\widehat\mu_n(x)$ is defined in \eqref{eq:cme} below.
+
+The infinite-forest prediction is $\widehat m(x)=\sum_i\widehat w_i(x)Y_i$. The same weights define a probability measure
+\begin{equation}\label{eq:weightedlaw}
+ \widehat P_x=\sum_{i=1}^n\widehat w_i(x)\delta_{Y_i},
+\end{equation}
+where $\delta_y$ is the Dirac measure at $y$, satisfying $\delta_y(A)=\1\{y\in A\}$ for any measurable event $A$. Thus $\widehat P_x(A)=\sum_i\widehat w_i(x)\1\{Y_i\in A\}$; the event $A$ is chosen when evaluating a probability. Its finite-forest counterpart $\widehat P_{x,B}$ uses $\widehat w_{i,B}(x)$ in the same formula. This weighted-distribution viewpoint underlies quantile regression forests \cite{meinshausen2006}. DRF learns \emph{tree partitions sensitive to changes in whole distributions} through MMD-based splitting \cite{cevid2022}.
+
+For scalar responses and any threshold $t\in\R$, the estimated conditional cumulative distribution function is $\widehat F_x(t)=\sum_i\widehat w_i(x)\1\{Y_i\le t\}$. For a quantile level $\tau\in(0,1)$, the estimated conditional quantile is $\widehat q_\tau(x)=\inf\{t:\widehat F_x(t)\ge\tau\}$. For vector responses, the same empirical law permits plug-in estimates of distributional functionals whenever these are well defined.
+
+\subsection{Kernel mean embeddings and maximum mean discrepancy}
+Let $k:\R^d\times\R^d\to\R$ be a positive-definite kernel with associated reproducing kernel Hilbert space (RKHS) $\calH$. Its canonical feature map is $\varphi(y)=k(y,\cdot)$, where $k(y,\cdot)$ denotes the function $z\mapsto k(y,z)$. When the expectation exists, the embedding of a probability distribution $P$ is
+\begin{equation}\label{eq:embedding}
+ \mu_P=\E_{Y\sim P}[k(Y,\cdot)]\in\calH.
+\end{equation}
+The \emph{maximum mean discrepancy} measures the largest difference in expectations over the RKHS unit ball:
+\begin{equation}\label{eq:mmdvariational}
+ \MMD_k(P,Q)=\sup_{\norm{f}_{\calH}\le1}
+ \left|\E_{Y\sim P}f(Y)-\E_{Z\sim Q}f(Z)\right|.
+\end{equation}
+The reproducing property gives $\E_P f(Y)=\ip{f}{\mu_P}_{\calH}$; Cauchy--Schwarz shows that the supremum in \eqref{eq:mmdvariational} equals $\norm{\mu_P-\mu_Q}_{\calH}$. For two distributions $P$ and $Q$, the squared maximum mean discrepancy is
+\begin{align}\label{eq:mmd}
+ \MMD_k^2(P,Q)&=\norm{\mu_P-\mu_Q}_{\calH}^2\\
+ &=\E_{Y,Y'\sim P}k(Y,Y')+\E_{Z,Z'\sim Q}k(Z,Z')
+ -2\E_{Y\sim P,Z\sim Q}k(Y,Z),\nonumber
+\end{align}
+where all variables in each expectation are independent. We use $\MMD_k^2$ for the \emph{squared} distance; this avoids confusion because some papers call the same squared quantity an ``MMD statistic.'' A kernel is \emph{characteristic} if the map $P\mapsto\mu_P$ is injective; equivalently, $\MMD_k(P,Q)=0$ implies $P=Q$. The Gaussian kernel with bandwidth $h>0$,
+\begin{equation}\label{eq:gaussiank}
+ k_h(y,z)=\exp\!\left(-\frac{\norm{y-z}_2^2}{2h^2}\right),\qquad h>0,
+\end{equation}
+is a standard characteristic choice. For more background on MMD as a two-sample discrepancy, see Gretton et al.\ \cite{gretton2012}.
+
+DRF estimates the \emph{conditional mean embedding}
+\begin{equation}\label{eq:cme}
+ \mu(x):=\E[k(Y,\cdot)\mid X=x]=\mu_{P_x},\qquad
+ \widehat\mu_n(x)=\sum_{i=1}^n\widehat w_i(x)k(Y_i,\cdot).
+\end{equation}
+Because the weights in \eqref{eq:weightedlaw} are nonnegative and sum to one, $\widehat\mu_n(x)$ is the embedding of the weighted empirical probability measure $\widehat P_x$.
+
+\section{Distributional Random Forests: Methodology and Theoretical Results}
+\label{sec:method}
+
+\subsection{Problem Formulation and Motivation}
+Given independent observations $(X_i,Y_i)_{i=1}^n$, with $X_i\in\R^p$ and $Y_i\in\R^d$, \'{C}evid et al.\ \cite{cevid2022} develop distributional random forests (DRF) for estimating the conditional response law $P_x=\mathcal L(Y\mid X=x)$. In the RKHS framework of Section~\ref{sec:background}, the corresponding estimation target is the conditional kernel mean embedding $\mu(x)=\E[k(Y,\cdot)\mid X=x]$. Their main results connect MMD-based splitting to Hilbert-space regression and establish consistency of the estimated embedding.
+
+Building on this framework, N\"af et al.\ \cite{naf2023} characterize the sampling fluctuations of the DRF estimator and develop half-sampling procedures for uncertainty quantification and conditional distributional comparisons. We review the estimation methodology and its guarantees before discussing the subsequent inference theory.
+
+\subsection{Distributional Random Forests (\texorpdfstring{\'{C}}{C}evid et al., 2022)}
+
+\subsubsection{Distribution-Sensitive Splitting via MMD}
+Let $P\subseteq\{1,\ldots,n\}$ be the observation-index set of a parent node, and let $L$ and $R$ be its disjoint left and right child index sets, so that $P=L\cup R$. Write $n_P=|P|$, $n_L=|L|$, and $n_R=|R|$, with $n_P=n_L+n_R$. The empirical response laws in the children are $\widehat P_L=n_L^{-1}\sum_{i\in L}\delta_{Y_i}$ and $\widehat P_R=n_R^{-1}\sum_{i\in R}\delta_{Y_i}$. The idealized DRF splitting score is
+\begin{equation}\label{eq:drfscore}
+ S_{\mathrm{DRF}}(L,R)=\frac{n_Ln_R}{n_P^2}\MMD_k^2(\widehat P_L,\widehat P_R).
+\end{equation}
+The algorithm selects a covariate and cut point maximizing \eqref{eq:drfscore} among permitted candidates. The balance factor $n_Ln_R/n_P^2$ downweights extremely unbalanced splits and arises naturally from the Hilbert-space CART identity below.
+
+For scalar responses, write $\overline Y_L=n_L^{-1}\sum_{i\in L}Y_i$ and $\overline Y_R=n_R^{-1}\sum_{i\in R}Y_i$. The analogous classification and regression tree (CART) score for least-squares regression is
+\begin{equation}\label{eq:cartscore}
+ S_{\mathrm{CART}}(L,R)=\frac{n_Ln_R}{n_P^2}(\overline Y_L-\overline Y_R)^2.
+\end{equation}
+The CART score in \eqref{eq:cartscore} responds to differences between child-node response means. With a characteristic kernel, the population MMD is positive whenever the child-node response distributions differ, including changes in variance, tails, and multivariate dependence. The sensitivity of empirical MMD splitting additionally depends on the sample size, kernel bandwidth, and accuracy of its random-feature approximation.
+
+\subsubsection{Computational Approximation Using Random Fourier Features}
+Computing an empirical MMD from a full kernel matrix is quadratic in the number of observations in a node. The practical method in \cite{cevid2022} uses random Fourier features (RFF) to approximate shift-invariant kernels. Let $M\ge1$ be the number of sampled frequencies, and let $I_d$ be the $d\times d$ identity matrix. For the Gaussian kernel, draw independent $\omega_1,\ldots,\omega_M\sim N(0,h^{-2}I_d)$ and use the complex features $\exp(\mathrm{i}\omega_b^\top y)$, where $\mathrm{i}=\sqrt{-1}$ is the imaginary unit and $b=1,\ldots,M$. Equivalently, one can use real sine--cosine features. A convenient approximation to the splitting score is
+\begin{equation}\label{eq:rffscore}
+ \widetilde S(L,R)=\frac{n_Ln_R}{n_P^2}\frac{1}{M}\sum_{b=1}^{M}
+ \left|\frac1{n_L}\sum_{i\in L}e^{\mathrm{i}\omega_b^\top Y_i}
+       -\frac1{n_R}\sum_{i\in R}e^{\mathrm{i}\omega_b^\top Y_i}\right|^2.
+\end{equation}
+Cumulative feature sums make scanning possible split points substantially cheaper than recomputing full kernel matrices for every candidate. The paper resamples random features between parent nodes. The theoretical RKHS statements apply to the corresponding idealized forest estimator under specified forest-construction assumptions. Their scope depends on these assumptions and the asymptotic setting.
+
+\subsubsection{The Hilbert-Space CART Interpretation}
+The key observation of \cite[Theorem~1]{cevid2022} is that MMD splitting is precisely squared-error splitting with the original scalar response replaced by $\varphi(Y)\in\calH$. For any nonempty node index set $A\subseteq\{1,\ldots,n\}$, let $\overline\varphi_A=|A|^{-1}\sum_{i\in A}\varphi(Y_i)$. The empirical within-node feature variance is
+\[
+ \widehat V_A=\frac1{|A|}\sum_{i\in A}\norm{\varphi(Y_i)-\overline\varphi_A}_{\calH}^2.
+\]
+The usual analysis-of-variance identity holds in any Hilbert space:
+\begin{equation}\label{eq:anova}
+ \widehat V_P-\frac{n_L}{n_P}\widehat V_L-\frac{n_R}{n_P}\widehat V_R
+ =\frac{n_Ln_R}{n_P^2}\norm{\overline\varphi_L-\overline\varphi_R}_{\calH}^2
+ =S_{\mathrm{DRF}}(L,R).
+\end{equation}
+A short derivation appears in Appendix~\ref{app:anova}. This identity identifies DRF splitting with variance reduction for the transformed response $\varphi(Y)$ in $\calH$.
+
+Theorem~1 of \cite{cevid2022} also provides a risk interpretation. Let $C\subseteq\R^p$ be a fixed parent region with $n_C=|\{i:X_i\in C\}|$ observed points, and let $\widetilde P_x$ be a fixed candidate conditional distribution estimator. Define the conditional feature-noise term
+\[
+ \mathcal V_C=\E\!\left[\norm{\varphi(Y)-\mu(X)}_{\calH}^2\mid X\in C\right],
+\]
+which depends on the data-generating law and the region $C$. Under the assumptions of the theorem, the empirical squared kernel-embedding prediction loss satisfies
+\begin{align}\label{eq:rkhsrisk}
+ &\frac{1}{n_C}\sum_{i:X_i\in C}
+ \norm{\varphi(Y_i)-\mu_{\widetilde P_{X_i}}}_{\calH}^2\nonumber\\
+ &\quad=\mathcal V_C+\E\!\left[\norm{\mu_{\widetilde P_X}-\mu(X)}_{\calH}^2\mid X\in C\right]
+   +O_p(n^{-1/2}).
+\end{align}
+Here $O_p(a_n)$ means a random quantity that is bounded in probability after division by $a_n$. For a fixed region $C$ with positive covariate probability, $n_C$ is of order $n$. The squared-error objective therefore has a conditional-embedding risk interpretation. The fixed-estimator qualification is relevant when interpreting data-adaptive splitting.
+
+\subsubsection{Consistency, Convergence Rates, and Assumptions}\label{sec:consistency}
+The principal consistency result, \cite[Theorem~2]{cevid2022}, applies at a fixed target covariate $x$ under forest and distributional assumptions. The analyzed forests are \emph{honest}, using separate observations for split selection and leaf estimation; \emph{symmetric}, with their law invariant under relabeling observations; and \emph{random-split}, assigning each coordinate a conditional splitting probability of at least $\pi/p$ for a constant $\pi>0$. Their $\alpha$-regularity assumption requires each child to receive at least an $\alpha$ fraction of the parent observations, with $0<\alpha\le0.2$, and every terminal leaf to contain between $\kappa$ and $2\kappa-1$ observations for a fixed $\kappa\in\mathbb N$. Each tree uses a subsample drawn \emph{without replacement}, of size $s_n\asymp n^\beta$ with $0<\beta<1$. The design has a density bounded above and below on $[0,1]^p$; the kernel is bounded and continuous; and $x\mapsto\mu(x)$ is Lipschitz.
+
+In this notation, the embedding error obeys
+\begin{equation}\label{eq:rate}
+ \norm{\widehat\mu_n(x)-\mu(x)}_{\calH}=O_p(n^{-\gamma}),\qquad
+ \gamma=\frac12\min\!\left\{1-\beta,
+ \frac{\log((1-\alpha)^{-1})}{\log(\alpha^{-1})}\frac{\pi}{p}\,\beta\right\},
+\end{equation}
+under the theorem's allowable choices of $\beta$ and forest parameters. The rate reflects the trade-off between sampling variability and leaf localization; its dimension dependence enters through the coordinate-splitting probability $\pi/p$. The theorem concerns the idealized infinite forest, averaged over subsamples and tree-building randomness. Minimax optimality of the exponent $\gamma$ remains a separate question.
+
+For any $f\in\calH$, the reproducing property and Cauchy--Schwarz give
+\begin{align}\label{eq:functionalrate}
+ \left|\int f\,d\widehat P_x-\E[f(Y)\mid X=x]\right|
+ &=\left|\ip{f}{\widehat\mu_n(x)-\mu(x)}_{\calH}\right|\\
+ &\le\norm{f}_{\calH}\norm{\widehat\mu_n(x)-\mu(x)}_{\calH}.
+ \nonumber
+\end{align}
+Here and below, $\ip{a}{b}_{\calH}$ denotes the RKHS inner product. Under additional assumptions ensuring that MMD convergence metrizes weak convergence, \cite[Corollaries~4--5]{cevid2022} also derives consistency for bounded continuous functionals and suitable CDF and quantile targets. These functional conclusions require the kernel and continuity conditions stated in the corresponding corollaries.
+
+
+\subsubsection{Empirical Findings}
+The applications in \cite[Section~4]{cevid2022} illustrate the use of a single fitted DRF for conditional quantiles, conditional copulas, and other distributional summaries. A particularly relevant experiment considers a multivariate Gaussian copula with covariate-dependent correlations and constant univariate marginal distributions. Figures~7--8 of \cite{cevid2022} show that MMD-based splitting follows the changing conditional dependence more closely than splitting based on aggregated marginal CART criteria. The paper also studies heterogeneous regression and causal-effect applications. These examples illustrate the relevance of distribution-sensitive partitions; their results depend on the specific data-generating mechanisms and tuning choices.
+
+\subsection{Statistical Inference for DRF (N\"af et al., 2023)}\label{sec:inference}
+
+
+\subsubsection{From Consistency to Statistical Inference}
+The 2022 consistency theorem controls the size of the estimation error. N\"af et al.\ \cite{naf2023} additionally characterize its sampling distribution, enabling inference for functionals of the estimated conditional embedding. Let $\sigma_n>0$ denote the forest standard-deviation scale, defined explicitly in \eqref{eq:sigmadef}. They study the appropriately rescaled error
+\begin{equation}\label{eq:xi}
+ \xi_n(x)=\frac{\widehat\mu_n(x)-\mu(x)}{\sigma_n},
+\end{equation}
+The scale $\sigma_n$ depends on the subsampling and forest construction. Inference requires a stronger subsampling condition than consistency. Writing
+\begin{equation}\label{eq:inferencebeta}
+ c=\frac{\log((1-\alpha)^{-1})}{\log(\alpha^{-1})}\frac{\pi}{p},
+ \qquad \frac{1}{1+c}<\beta<1,
+\end{equation}
+assumption (F5) of \cite{naf2023} makes the localization bias negligible relative to $\sigma_n$. The paper retains honest, regular, symmetric, random-split trees with fixed terminal-leaf size bounds. Its additional data conditions require Lipschitz conditional second moments of the feature and of each RKHS function, a uniform conditional feature moment bound of order $2+\delta$ for some $\delta>0$, and positive conditional feature variance and variance of every nonzero RKHS function. Bounded kernels supply the feature moment bound; these conditions do not require finite high-order moments of the raw response $Y$.
+
+\subsubsection{Asymptotic Linearization and Gaussian Limit}
+The argument exploits the representation of an idealized infinite forest as a symmetric subsample statistic. Define $Z_i=(X_i,k(Y_i,\cdot))$, and let $T_n(Z_1,\ldots,Z_{s_n})\in\calH$ be the tree predictor constructed on a subsample of size $s_n$, averaged over its auxiliary tree randomization. Its first-order H\'ajek projection is
+\[
+ T_n^{(1)}(Z_i)=\E[T_n(Z_1,\ldots,Z_{s_n})\mid Z_i]
+           -\E[T_n(Z_1,\ldots,Z_{s_n})].
+\]
+The projection terms are centered and independent across $i$. For an RKHS-valued random element $U$, write $\Var_{\calH}(U)=\E\norm{U-\E U}_{\calH}^2$, and define the squared standard-deviation scale
+\begin{equation}\label{eq:sigmadef}
+ \sigma_n^2=\frac{s_n^2}{n}\Var_{\calH}(T_n^{(1)}(Z_1)).
+\end{equation}
+Under the paper's forest, kernel, and distributional assumptions, the first-order approximation in \cite[Theorem~3]{naf2023} has the form
+\begin{equation}\label{eq:hajek}
+ \widehat\mu_n(x)-\mu(x)
+ =\frac{s_n}{n}\sum_{i=1}^n T_n^{(1)}(Z_i)+o_p(\sigma_n).
+\end{equation}
+Here $o_p(\sigma_n)$ denotes an RKHS remainder whose norm divided by $\sigma_n$ converges to zero in probability. The proof separates four tasks: control the localization bias using \eqref{eq:inferencebeta}; show that higher-order terms of the subsample statistic are negligible relative to its H\'ajek projection; establish scalar central limit theorems for inner products with fixed RKHS functions; and prove tightness to obtain convergence in the full Hilbert space. The last step is essential because convergence of all scalar projections alone does not ensure weak convergence in an infinite-dimensional space.
+
+Let $C_x$ denote the conditional covariance operator of the RKHS feature $k(Y,\cdot)$ given $X=x$, and let $\operatorname{tr}(C_x)$ be its trace (the total conditional feature variance). Define $\Sigma_x=C_x/\operatorname{tr}(C_x)$, assumed well defined by nondegeneracy. The notation $\mathcal N_{\calH}(0,\Sigma_x)$ denotes a centered Gaussian random element in $\calH$ with covariance operator $\Sigma_x$. Then \cite[Theorem~6]{naf2023} proves, for fixed $x$ and under assumptions (F1)--(F5), (D1)--(D7), and (K1)--(K2), that
+\begin{equation}\label{eq:hilbertclt}
+ \frac{\widehat\mu_n(x)-\mu(x)}{\sigma_n}
+ \ \xrightarrow{\,d\,}\ \mathcal N_{\calH}(0,\Sigma_x).
+\end{equation}
+In particular, for $f\in\calH$,
+\begin{equation}\label{eq:covop}
+ \ip{\Sigma_x f}{f}_{\calH}
+ =\frac{\Var(f(Y)\mid X=x)}{\Var_{\calH}(k(Y,\cdot)\mid X=x)}.
+\end{equation}
+The inference assumptions strengthen those for consistency by controlling conditional feature moments and ensuring nondegenerate covariance. The convergence in \eqref{eq:hilbertclt} holds in the RKHS and therefore yields Gaussian limits for continuous linear functionals of the embedding.
+
+\subsubsection{Half-Sampling Bootstrap and Uncertainty Quantification}
+The scale $\sigma_n$ and limiting law in \eqref{eq:hilbertclt} must be approximated for practical inference. The second paper therefore proposes a half-sampling procedure. Let $W_i\overset{\mathrm{iid}}\sim\operatorname{Bernoulli}(1/2)$, independent of the data, and set $S=\{i:W_i=1\}$. Fit the corresponding subforest estimator $\widehat\mu_n^S(x)$ from trees contained in this half-sample, retaining the tree subsample size $s_n$ defined for the original sample size $n$. Here $\E_W$ denotes expectation over the resampling indicators $W_1,\ldots,W_n$ conditional on the observed data $\mathcal D_n$. The conditional resampling error is
+\begin{equation}\label{eq:half}
+ \xi_n^S(x)=\frac{\widehat\mu_n^S(x)-\widehat\mu_n(x)}{\sigma_n}.
+\end{equation}
+The conditional weak convergence statement in \cite[Theorem~7]{naf2023} shows that the resampling distribution approximates the same Gaussian limit as the original estimator under its assumptions. The practical implementation groups trees into subforests or ``little bags,'' giving both the overall estimate and its resampled counterparts. In addition, \cite[Corollary~9]{naf2023} establishes the variance-scale approximation
+\begin{equation}\label{eq:halfvariance}
+ \frac{\E_W\!\left[
+    \norm{\widehat\mu_n^S(x)-\widehat\mu_n(x)}_{\calH}^2
+    \mid \mathcal D_n\right]}{\sigma_n^2}
+ \xrightarrow{p}1,
+\end{equation}
+This provides a feasible estimator of the unknown scale $\sigma_n^2$.
+
+For a continuous linear functional $L:\calH\to\R$, resampled contrasts $L(\widehat\mu_n^S(x))-L(\widehat\mu_n(x))$ estimate the relevant uncertainty. Nonlinear targets require additional differentiability and delta-method conditions. In particular, \cite[Remark~10]{naf2023} notes that the identity function $y\mapsto y$ lies outside the Gaussian RKHS on $\R$; inference for the ordinary conditional mean therefore requires a separate justification. Likewise, Gaussian confidence intervals for conditional quantiles require additional regularity beyond consistency of the quantile estimator.
+
+For example, fix $f\in\calH$ and consider the scalar target
+\[
+ \theta_f(x)=\E[f(Y)\mid X=x]
+ =\ip{f}{\mu(x)}_{\calH},\qquad
+ \widehat\theta_f(x)=\sum_{i=1}^n\widehat w_i(x)f(Y_i).
+\]
+By the continuous mapping theorem applied to \eqref{eq:hilbertclt}, if
+$\ip{\Sigma_x f}{f}_{\calH}>0$, then
+\begin{equation}\label{eq:scalarclt}
+ \frac{\widehat\theta_f(x)-\theta_f(x)}
+ {\sigma_n\sqrt{\ip{\Sigma_x f}{f}_{\calH}}}
+ \xrightarrow{\,d\,}N(0,1).
+\end{equation}
+The dispersion of the half-sampling contrasts
+$\ip{f}{\widehat\mu_n^S(x)-\widehat\mu_n(x)}_{\calH}$
+can be used to approximate the corresponding standard error
+$\widehat{\mathrm{se}}_f(x)$. Let $\zeta\in(0,1)$ be the desired noncoverage probability and define $z_q=\Phi^{-1}(q)$ for $q\in(0,1)$, where $\Phi$ is the standard normal cumulative distribution function. Under the required resampling and
+nondegeneracy conditions, an asymptotic two-sided $100(1-\zeta)\%$ confidence interval is
+\begin{equation}\label{eq:scalarci}
+ \widehat\theta_f(x)\ \pm\
+  z_{1-\zeta/2}\,\widehat{\mathrm{se}}_f(x).
+\end{equation}
+This construction applies directly to continuous linear functionals of the
+embedding. Confidence intervals for nonlinear distributional summaries
+require suitable differentiability or other target-specific arguments.
+
+\subsubsection{Conditional Distributional Comparisons and Testing}
+Let $A_{\mathrm{tr}}\in\{0,1\}$ denote an observed group or treatment indicator, with group sizes $n_0$ and $n_1$. Define $P_{a,x}=\mathcal L(Y\mid X=x,A_{\mathrm{tr}}=a)$ and its kernel embedding $\mu_a(x)=\mu_{P_{a,x}}$ for $a\in\{0,1\}$. Let $\widehat\mu_a(x)$ denote the DRF embedding estimate in group $a$. A central application is testing equality of the conditional response distributions:
+\begin{equation}\label{eq:twosample}
+ H_0:P_{0,x}=P_{1,x}\qquad\text{versus}\qquad H_1:P_{0,x}\ne P_{1,x}.
+\end{equation}
+Write $\Delta(x)=\mu_1(x)-\mu_0(x)$. Given separate DRF estimators for the two groups, the test is based on the conditional MMD statistic
+\begin{equation}\label{eq:conditionaltest}
+ \widehat T_n(x)=
+ \norm{\widehat\mu_1(x)-\widehat\mu_0(x)}_{\calH}^2.
+\end{equation}
+The half-sampling distributions of the centered group-specific estimators provide a critical value for $\widehat T_n(x)$ under $H_0$. Theorem~12 of \cite{naf2023} assumes (F1)--(F5) and (D1)--(D7) for each group, kernel conditions (K1)--(K3), strong ignorability, and the variance-comparability condition (30). It also requires $n_0,n_1\to\infty$ with $n_0/n_1\to1$. Under these conditions, the calibrated test has asymptotic Type-I error at most the nominal level and power tending to one for fixed unequal conditional distributions.
+
+For causal interpretations, let $Y^a$ be the potential response under treatment $a$. Under consistency, conditional exchangeability $(Y^0,Y^1)\perp A_{\mathrm{tr}}\mid X$, and positivity $0<\Pp(A_{\mathrm{tr}}=a\mid X=x)<1$, the observed group laws identify $\mathcal L(Y^a\mid X=x)$. In this setting, the \emph{conditional witness function} is
+\begin{equation}\label{eq:witness}
+ g_x(y)=\Delta(x)(y)
+ =\E[k(Y^1,y)\mid X=x]-\E[k(Y^0,y)\mid X=x].
+\end{equation}
+It describes how the embedded response distributions differ across values of $y$. \cite[Theorem~13]{naf2023} establishes asymptotically simultaneous confidence bands for $g_x$ using (F1)--(F5) and (D1)--(D7) for both groups, (K1)--(K2), strong ignorability, condition (30), and $n_0/n_1\to1$. The test of Theorem~12 additionally uses the characteristic-kernel condition (K3). Under the stated causal identification assumptions, the conditional comparison can be given a causal interpretation.
+
+\subsubsection{Empirical Findings}
+N\"af et al.\ \cite[Section~6]{naf2023} evaluate the proposed uncertainty estimates using simulations for conditional average treatment effects, conditional quantiles, conditional correlations, and witness functions. For conditional quantiles, Figures~3--4 report coverage close to the nominal $95\%$ level away from the discontinuity in the conditional mean function. Coverage deteriorates near that boundary. The other simulations examine confidence interval length, bias, and dependence on sample size. Together, the results illustrate the empirical performance of half-sampling inference and the challenges posed by abrupt distributional changes.
+
+\subsection{Discussion of the Main Results}
+\begin{table}[htbp]
+\centering\small
+\caption{Distinct roles of the two assigned DRF papers.}
+\label{tab:papers}
+\begin{tabularx}{\linewidth}{@{}p{0.19\linewidth}YY@{}}
+\toprule
+ & \textbf{\'{C}evid et al.\ (2022)} & \textbf{N\"af et al.\ (2023)}\\
+\midrule
+Main question & How should a forest estimate an entire conditional law? & How uncertain is the estimated conditional embedding?\\
+Core method & Distribution-sensitive MMD splitting and forest weights & RKHS asymptotic linearization and half-sampling\\
+Main guarantees & RKHS consistency and rates; functional consistency under additional conditions & Gaussian limit; half-sampling variance approximation; conditional tests\\
+Important qualification & Regular, honest forest construction; Lipschitz embedding & Stronger conditional moment and nondegeneracy assumptions\\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+The principal methodological contribution of the 2022 paper is its MMD splitting criterion, which constructs neighborhoods sensitive to heterogeneity in the complete response distribution. Conventional forest weights already support weighted empirical calculations; DRF additionally tailors the partitions to distributional variation. The paper's consistency results concern the resulting conditional kernel embedding under regularity conditions.
+
+The 2023 paper extends this framework through a first-order projection, a Hilbert-space Gaussian limit, and an asymptotically valid half-sampling approximation. Its applications include confidence regions and conditional distributional tests. The numerical studies in both papers illustrate the respective roles of distribution-sensitive estimation and uncertainty quantification. The inferential guarantees require additional moment and nondegeneracy conditions, and extensions to particular nonlinear functionals require appropriate regularity.
+
+\section{Related and Follow-up Work}\label{sec:related}
+\subsection{Foundations: Quantile and Generalized Random Forests}
+Breiman's random forests \cite{breiman2001} learn prediction-adaptive neighborhoods through recursively selected splits and aggregation. Meinshausen's quantile regression forests \cite{meinshausen2006} use forest weights to estimate a weighted conditional CDF and its quantiles. Their original partitions arise from regression-oriented splitting, which may have weak population signal when the response mean is constant across candidate children. DRF retains the weighted empirical distribution estimator and directly trains partitions with a distributional objective.
+
+Generalized random forests (GRF) \cite{athey2019} target parameters defined through local estimating equations; Wager and Athey \cite{wagerathey2018} establish important forest-based inferential principles under honesty and subsampling. GRF can be specialized to selected targets, such as treatment effects or quantiles. DRF constructs a representation of the conditional law suitable for evaluating multiple functionals after training. Kernel two-sample testing and the RKHS description of MMD in Gretton et al.\ \cite{gretton2012} supply the distributional metric used in DRF splitting.
+
+\subsection{Conditional Distributional Treatment Effects}
+N\"af, Park, and Susmann \cite{nafpark2026} introduce \emph{Causal-DRF} (AISTATS 2026), targeting the conditional kernel treatment effect (CKTE), the RKHS difference between the conditional outcome distributions under treatment and control. Their modification of distribution-sensitive splitting is designed to emphasize heterogeneity in the treatment-induced distributional contrast. Under the paper's assumptions, they establish consistency, asymptotic normality, and an approximation to sampling uncertainty. This extends DRF's inference framework toward a causal estimand with a targeted splitting rule, subject to the usual causal identification assumptions.
+
+Jain and Luedtke \cite{jainluedtke2026} (ICML 2026) study conditional distributional treatment effects using a distinct, doubly robust construction. They propose estimation and a test of \emph{global homogeneity} of the conditional potential-outcome distributions, with asymptotic Type-I error control and consistency against fixed alternatives under their assumptions. Their procedure also aggregates evidence across kernel bandwidths. These contributions address related inferential goals through different estimands and procedures. Causal-DRF estimates a covariate-specific RKHS treatment contrast through forests. Jain and Luedtke develop doubly robust estimation and a global testing objective. Their bandwidth aggregation is particularly relevant to the empirical sensitivity analysis in Section~\ref{sec:simulation}.
+
+\subsection{Distributional Forests for Functional Responses}
+Kundu and Linero \cite{kundulinero2026} extend distributional forests to random functions, with responses such as trajectories and curves. Their 2026 preprint develops kernels over function spaces, conditions for consistency, and scoring rules for evaluating conditional distribution estimates. This extends the original multivariate outcome setting from $\R^d$ to functional response spaces. The choice of functional kernel determines which aspects of trajectories the splitting procedure emphasizes; inference for such spaces requires additional theoretical justification beyond the finite-dimensional applications in the assigned papers.
+
+\subsection{Comparison and Remaining Challenges}
+\begin{table}[htbp]
+\centering\small
+\caption{Comparative view of follow-up approaches and the limitations they address.}
+\label{tab:literature}
+\begin{tabularx}{\linewidth}{@{}>{\raggedright\arraybackslash}p{0.19\linewidth}>{\raggedright\arraybackslash}p{0.25\linewidth}Y@{}}
+\toprule
+\textbf{Work} & \textbf{Primary target} & \textbf{Main contribution and theoretical scope}\\
+\midrule
+Quantile forests \cite{meinshausen2006} & Scalar conditional quantiles & Weighted empirical CDF using regression-oriented forest partitions\\
+GRF \cite{athey2019} & Local moment-defined parameters & Estimating-equation targets and forest inference under regularity\\
+DRF \cite{cevid2022,naf2023} & Multivariate conditional law & MMD splitting, RKHS consistency, and half-sampling inference\\
+Causal-DRF \cite{nafpark2026} & Conditional kernel treatment effect & Treatment-contrast splitting and asymptotic inference\\
+Jain--Luedtke \cite{jainluedtke2026} & Conditional distributional treatment effects & Doubly robust estimation, global testing, and bandwidth aggregation\\
+Functional DRF \cite{kundulinero2026} & Conditional law of curves & Function-space kernels and conditional-law consistency\\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+The extensions identify three active directions: adapting the splitting target to a causal contrast, constructing estimators robust to nuisance-model error, and choosing kernels for more complex response spaces. The results also emphasize the importance of kernel bandwidth, finite-sample calibration, and regularity of the covariate-to-distribution map. These considerations motivate our controlled splitting study below and the research questions in Section~\ref{sec:discussion}.
+
+\section{Independent Analysis: A Variance Change with Constant Conditional Mean}\label{sec:original}
+\subsection{An elementary distributional change-point model}
+Let $X\sim U(0,1)$ and suppose
+\begin{equation}\label{eq:model}
+ Y\mid X=x\sim
+ \begin{cases}
+  P_0=N(0,1),&x\le\theta_0,\\
+  P_1=N(0,4),&x>\theta_0,
+ \end{cases}\qquad \theta_0=\frac12.
+\end{equation}
+For every $x$, $\E[Y\mid X=x]=0$. Consequently, population mean-based splitting cannot distinguish the two regimes by a change in conditional mean. Nevertheless, $\Var(Y\mid X=x)$ jumps from $1$ to $4$.
+
+We now analyze the \emph{population} analogue of the balanced empirical MMD score \eqref{eq:drfscore}. For a candidate split $t\in(0,1)$, let
+\begin{equation}\label{eq:popsplit}
+ \mathcal S(t)=t(1-t)\MMD_k^2\!\left(\mathcal L(Y\mid X\le t),\mathcal L(Y\mid X>t)\right).
+\end{equation}
+This population score follows from the uniform distribution of $X$. It describes the preferred split in the population objective. Sampling variability can shift the empirical maximizing split away from its population counterpart.
+
+\begin{proposition}[Identification of a distributional change point]\label{prop:ident}
+Suppose $X\sim U(0,1)$ and, for almost every $x\in(0,1)$,
+\[
+ \mathcal L(Y\mid X=x)=\begin{cases}
+ P_0,&x\le\theta_0,\\
+ P_1,&x>\theta_0,
+ \end{cases}
+\]
+where $0<\theta_0<1$ and $D:=\MMD_k^2(P_0,P_1)>0$. Then the population balanced MMD score is
+\begin{equation}\label{eq:generalpopscore}
+ \mathcal S(t)=D\begin{cases}
+ \displaystyle \frac{t(1-\theta_0)^2}{1-t},&0<t\le\theta_0,\\[6pt]
+ \displaystyle \frac{(1-t)\theta_0^2}{t},&\theta_0\le t<1.
+ \end{cases}
+\end{equation}
+It has the unique maximizer $t=\theta_0$. If additionally $\E_{P_0}Y=\E_{P_1}Y$, the corresponding population CART improvement in squared-error mean regression is zero for every $t\in(0,1)$.
+\end{proposition}
+\begin{proof}
+Write $\mu_j=\mu_{P_j}\in\calH$. For $t\le\theta_0$, the left response law is $P_0$. The right response law is the mixture
+\[
+ Q_t=\frac{\theta_0-t}{1-t}P_0+\frac{1-\theta_0}{1-t}P_1.
+\]
+By linearity of kernel embeddings,
+\[
+ \mu_{P_0}-\mu_{Q_t}=\frac{1-\theta_0}{1-t}(\mu_0-\mu_1).
+\]
+Squaring its RKHS norm and multiplying by $t(1-t)$ gives the first branch of \eqref{eq:generalpopscore}. For $t\ge\theta_0$, the right response law is $P_1$ and the left response law is $(\theta_0/t)P_0+(1-\theta_0/t)P_1$, giving the second branch. The first branch is strictly increasing in $t$ and the second strictly decreasing in $t$ since $D>0$. Hence the unique maximum occurs at $t=\theta_0$.
+
+If both regimes have the same mean $m$, the mean of each mixture is also $m$. Therefore the population analogue of \eqref{eq:cartscore}, namely $t(1-t)(\E[Y\mid X\le t]-\E[Y\mid X>t])^2$, is identically zero.
+\end{proof}
+
+For the particular midpoint $\theta_0=1/2$, this simplifies to
+\begin{equation}\label{eq:midpointscore}
+ \mathcal S(t)=\frac D4\begin{cases}
+ \displaystyle \frac{t}{1-t},&0<t\le\frac12,\\[5pt]
+ \displaystyle \frac{1-t}{t},&\frac12\le t<1.
+ \end{cases}
+\end{equation}
+The proposition applies to any distinct laws $P_0,P_1$ separated by the chosen kernel, including non-Gaussian distributions. The CART statement additionally requires equality of the two regime means. For CART applied to the transformed response $Y^2$, the population score is
+\begin{equation}\label{eq:cartvariance}
+ \mathcal S_{Y^2}(t)=\bigl(\E_{P_1}Y^2-\E_{P_0}Y^2\bigr)^2
+ \begin{cases}
+ \displaystyle\frac{t(1-\theta_0)^2}{1-t},&t\le\theta_0,\\[4pt]
+ \displaystyle\frac{(1-t)\theta_0^2}{t},&t\ge\theta_0,
+ \end{cases}
+\end{equation}
+provided the fourth moments are finite. For \eqref{eq:model}, the difference in second moments is $4-1=3$, so \eqref{eq:cartvariance} is uniquely maximized at $\theta_0$. This targeted transformation supplies a variance-sensitive baseline for the simulation.
+
+\subsection{Closed-form MMD for the Gaussian variance change}
+Write $D_h=\MMD_{k_h}^2(P_0,P_1)$ for the squared Gaussian-kernel MMD between the two regimes. This quantity is explicitly computable in the setting of Proposition~\ref{prop:ident}. If $U\sim N(0,a^2)$ and $V\sim N(0,b^2)$ are independent, then $U-V\sim N(0,a^2+b^2)$ and
+\begin{equation}\label{eq:gaussexpect}
+ \E\exp\!\left(-\frac{(U-V)^2}{2h^2}\right)
+ =\frac{1}{\sqrt{1+(a^2+b^2)/h^2}}.
+\end{equation}
+It follows from \eqref{eq:mmd} that
+\begin{equation}\label{eq:gaussmmd}
+ D_h=\frac{1}{\sqrt{1+2/h^2}}+
+ \frac{1}{\sqrt{1+8/h^2}}-
+ \frac{2}{\sqrt{1+5/h^2}}.
+\end{equation}
+At $h=1$, $D_1=1/\sqrt3+1/3-2/\sqrt6\approx0.094187>0$. The population MMD splitting score is therefore uniquely maximized at $\theta_0=1/2$, with maximum $D_1/4\approx0.023547$, even though the conditional mean is constant. Figure~\ref{fig:population} illustrates the normalized population scores; the MMD and CART-on-$Y^2$ curves coincide after each is normalized by its own maximum.
+\begin{figure}[htbp]
+\centering
+\includegraphics[width=0.79\linewidth]{drf_population_scores.pdf}
+\caption{Population splitting criteria in the variance-change example. The MMD and CART-on-$Y^2$ curves are scaled by their positive maxima; CART on $Y$ remains zero. MMD and CART on $Y^2$ identify $\theta_0=0.5$; CART on $Y$ has zero population improvement at every candidate split.}
+\label{fig:population}
+\end{figure}
+
+\begin{remark}[An important mismatch with the asymptotic assumptions]\label{rem:jump}
+The mapping $x\mapsto\mu(x)$ in \eqref{eq:model} jumps at $x=1/2$, violating global Lipschitz continuity. Hence \eqref{eq:model} falls outside the smooth conditional-embedding assumptions used for the global consistency and inference results reviewed in Sections~\ref{sec:consistency} and \ref{sec:inference}. Proposition~\ref{prop:ident} follows from a direct population computation independently of those theorems. A smooth variance transition is a natural follow-up if the aim is to study DRF under the stated theorem assumptions.
+\end{remark}
+
+\section{Numerical Study: Root-Split Comparisons and Kernel Sensitivity}\label{sec:simulation}
+\subsection{Design and Estimators}
+We assess how three root-splitting rules identify the change point in \eqref{eq:model}: standard squared-error CART on $Y$; squared-error CART on the transformed response $Y^2$; and exact Gaussian-kernel MMD splitting. The second criterion explicitly targets the variance change, providing a stronger baseline than CART on $Y$ alone. We generate $R=200$ independent datasets at each $n\in\{200,400,800\}$, with seed $6242$. Within each dataset, all three methods use the same observations. The candidate thresholds are midpoints of consecutive ordered covariate observations, with at least $\lceil0.15n\rceil$ observations in each child.
+
+Every method maximizes the balanced score. For the transformed CART baseline this is $n_Ln_R(\overline{Y^2}_L-\overline{Y^2}_R)^2/n_P^2$. MMD uses the biased empirical squared discrepancy, including diagonal terms, evaluated from the exact Gaussian kernel matrix with $h=1$; the practical DRF random-feature approximation is outside the scope of this experiment. Let $\widehat\theta$ denote the maximizing threshold. We report the mean and median of $|\widehat\theta-\theta_0|$, its Monte Carlo standard error (MCSE), and the fraction within $0.1$ of the true change point.
+
+\subsection{Root-Split Results}\label{sec:results}
+\begin{table}[htbp]
+\centering\small
+\caption{Change-point error across 200 independent replications. MCSE is the Monte Carlo standard error of the \emph{mean absolute error}. All methods use the same datasets at each sample size.}
+\label{tab:simulation}
+\input{root_rows.tex}
+\end{table}
+
+The mean-oriented CART root split shows little improvement as $n$ increases, consistent with its flat population splitting objective. Both variance-sensitive criteria produce much smaller errors, which decrease across the sample sizes considered. At $n=800$, MMD has mean absolute error $\RootMMDMAE$ and CART on $Y^2$ has $\RootSquareMAE$. The paired mean difference (MMD minus CART on $Y^2$) is $\RootPairedDifference$ with MCSE $\RootPairedMCSE$, computed from within-dataset differences. The two variance-sensitive methods achieve similar accuracy, with substantially lower errors than mean-oriented CART. Figure~\ref{fig:boxplots} displays the distributions of estimated split locations.
+\begin{figure}[htbp]
+\centering
+\includegraphics[width=\linewidth]{drf_split_boxplots.pdf}
+\caption{Estimated root split across 200 replications at each sample size. Dashed horizontal lines mark the true threshold $\theta_0=0.5$. Boxes depict the median and interquartile range (IQR); whiskers follow the default $1.5\,\mathrm{IQR}$ convention and omit plotted outliers.}
+\label{fig:boxplots}
+\end{figure}
+
+\subsection{Sensitivity to the Gaussian Kernel Bandwidth}
+In a separate simulation with $n=400$, $R=120$, and seed $6243$, we compare exact MMD splitting using $h\in\{0.25,0.5,1,2,4\}$. All bandwidths are evaluated on the same 120 datasets; the bandwidth is fixed in advance for each comparison. The results are summarized in Table~\ref{tab:bandwidth} and Figure~\ref{fig:bandwidth}.
+\begin{table}[htbp]
+\centering\small
+\caption{Bandwidth sensitivity for exact Gaussian MMD root splitting ($n=400$, 120 replications). MCSE quantifies simulation uncertainty for the mean absolute error.}
+\label{tab:bandwidth}
+\input{bandwidth_rows.tex}
+\end{table}
+\begin{figure}[htbp]
+\centering
+\includegraphics[width=0.77\linewidth]{drf_bandwidth_sensitivity.pdf}
+\caption{Mean absolute split error by Gaussian kernel bandwidth. Error bars are $\pm1.96$ Monte Carlo standard errors of the estimated means and represent simulation precision.}
+\label{fig:bandwidth}
+\end{figure}
+
+Within this grid, $h=\BestBandwidth$ has the smallest observed mean absolute error ($\BestBandwidthMAE$), followed closely by $h=1$ ($\BandwidthOneMAE$). For the matched datasets, the mean error difference between $h=2$ and $h=1$ is $\BandwidthPairedDifference$ with paired MCSE $\BandwidthPairedMCSE$. The error rises at $h=4$. The ranking is specific to this variance-change model and finite sample sizes; the paired comparison does not establish a clear advantage of $h=2$ over $h=1$.
+
+\subsection{Interpretation and Limitations}
+The analysis isolates the effect of the splitting target. A direct second-moment transformation recovers the relevant variance signal. MMD supplies a flexible distributional criterion sensitive to a broader collection of changes through its kernel representation. This root-split experiment uses one-dimensional covariates, scalar Gaussian responses, and a single splitting decision. Section~\ref{sec:fullforest} extends the evaluation to complete forest estimators and additional distributional alternatives. The discontinuous variance model violates the Lipschitz conditional-embedding assumption used in the assigned papers' main asymptotic forest results, as discussed in Remark~\ref{rem:jump}. The results are therefore evidence about the finite-sample splitting mechanism in this controlled model. Evaluation of the official honest DRF algorithm and its half-sampling inference remains a separate study.
+
+
+\section{Full-Forest Evaluation Across Distributional Alternatives}\label{sec:fullforest}
+\subsection{Research Question and Experimental Models}
+The preceding experiments isolate a single root split. We examine whether distribution-oriented tree partitions improve the estimated \emph{conditional law} after aggregation over fully grown trees. The evaluation considers four data-generating mechanisms. In every setting $X=(X^{(1)},X^{(2)},X^{(3)})\sim U([0,1]^3)$; the superscript indexes covariate coordinates, with $X_i^{(j)}$ denoting coordinate $j$ of training observation $i$. The response distribution depends on the first coordinate through $G(x)=\1\{x^{(1)}>1/2\}$, and $X^{(2)},X^{(3)}$ are independent nuisance covariates. Here $t_3$ denotes a Student $t$ random variable with three degrees of freedom, $a=0.95$ specifies the separation in the Gaussian mixture, and $N_2(0,\Sigma)$ denotes a bivariate normal law with covariance matrix $\Sigma$. The four conditional response laws are
+\begin{align}
+\text{Variance:}\quad & Y\mid X=x\sim
+ \begin{cases}N(0,1),&G(x)=0,\\N(0,4),&G(x)=1;\end{cases}\label{eq:ffvariance}\\[2pt]
+\text{Tail shape:}\quad & Y\mid X=x\sim
+ \begin{cases}N(0,1),&G(x)=0,\\t_3/\sqrt{3},&G(x)=1;\end{cases}\label{eq:fftail}\\[2pt]
+\text{Bimodality:}\quad &Y\mid X=x\sim
+ \begin{cases}N(0,1),&G(x)=0,\\ \frac12N(-a,1-a^2)+\frac12N(a,1-a^2),&G(x)=1,\end{cases}\label{eq:ffmix}
+\end{align}
+The variable $t_3/\sqrt{3}$ has unit variance, and both distributions in \eqref{eq:ffmix} have mean zero and variance one. Finally, for $Y\in\R^2$,
+\begin{equation}\label{eq:ffdep}
+ \begin{aligned}
+ \text{Dependence:}\qquad Y\mid X=x&\sim N_2(0,\Sigma_{G(x)}),\\
+ \Sigma_0&=\begin{pmatrix}1&0.8\\0.8&1\end{pmatrix},\qquad
+ \Sigma_1=\begin{pmatrix}1&-0.8\\-0.8&1\end{pmatrix}.
+ \end{aligned}
+\end{equation}
+In the bivariate case, write $Y=(Y^{(1)},Y^{(2)})$, where parenthesized superscripts index the response coordinates. The dependence alternative preserves both marginal response laws. These designs isolate changes in scale, tail shape, modality, and joint dependence. The step changes provide controlled evaluations; their conditional embeddings are discontinuous at $x^{(1)}=1/2$, so the Lipschitz smoothness assumption of the theoretical consistency and inference results reviewed in Section~\ref{sec:method} does not hold globally.
+
+\subsection{Forest Construction and Distributional Predictions}
+We compare two finite, $B=180$-tree bootstrap ensembles with identical training covariates, bootstrap randomization, and tree hyperparameters. The \emph{mean-CART forest} splits using the original scalar or multivariate response $Y$. Its terminal-leaf weights define a weighted empirical conditional law, as in quantile regression forests. The second model, termed the \emph{RFF--MMD forest}, constructs a shared feature map from $M=48$ independent Gaussian Fourier frequencies:
+\begin{equation}\label{eq:fffeatures}
+ \psi_M(y)=\frac1{\sqrt M}\bigl(
+ \cos(\omega_1^\top y),\ldots,\cos(\omega_M^\top y),
+ \sin(\omega_1^\top y),\ldots,\sin(\omega_M^\top y)\bigr),\qquad
+ \omega_j\sim N(0,h^{-2}I_d).
+\end{equation}
+For a candidate split with child index sets $L,R$, define the empirical feature means $\overline\psi_{M,L}=n_L^{-1}\sum_{i\in L}\psi_M(Y_i)$ and $\overline\psi_{M,R}=n_R^{-1}\sum_{i\in R}\psi_M(Y_i)$. Multioutput squared-error CART is fitted to $\psi_M(Y)$, so its empirical variance reduction for a prospective split is proportional to
+\[
+ \frac{n_Ln_R}{n_P^2}\bigl\|\overline\psi_{M,L}-\overline\psi_{M,R}\bigr\|_2^2,
+\]
+which approximates the MMD score in \eqref{eq:drfscore}. This provides a reproducible implementation of the distribution-sensitive forest splitting principle using standard tree software. The Fourier features are fixed throughout each fitted forest; the original DRF algorithm can resample them between nodes. We use ordinary bootstrap trees with no sample-splitting honesty. Consequently, the experiment evaluates an \emph{RFF approximation to MMD-splitting forests}, and the asymptotic inference theory of N\"af et al.\ \cite{naf2023} is outside its scope.
+
+For a query $x$, let $N_{bi}(x)$ be the number of bootstrap occurrences of training observation $i$ in the leaf containing $x$ for tree $b$. The denominator $\sum_{j=1}^nN_{bj}(x)$ counts bootstrap observations in that leaf, including repeated occurrences. Both ensembles form valid distributional weights
+\begin{equation}\label{eq:ffweights}
+ \widehat w_{i,B}(x)=\frac1B\sum_{b=1}^B
+ \frac{N_{bi}(x)}{\sum_{j=1}^nN_{bj}(x)},\qquad
+ \widehat P_{x,B}=\sum_{i=1}^n\widehat w_{i,B}(x)\delta_{Y_i}.
+\end{equation}
+Bootstrap multiplicities are counted explicitly in every leaf. Each repetition uses $n=650$ training pairs, $360$ independent query--response pairs, and random forest parameters \texttt{max\_features=2}, \texttt{min\_samples\_leaf=12}, and \texttt{bootstrap=True}. The Gaussian bandwidth is $h=1$ for scalar responses and $h=1.4$ for the bivariate dependence setting. All parameters were fixed for this comparison. There are $R=25$ independent repetitions per setting, using matched datasets for the two estimators.
+
+\subsection{Evaluation Metrics}
+Let $X_1^{\mathrm{test}},\ldots,X_{n_{\mathrm{test}}}^{\mathrm{test}}$ be independent test covariate vectors, where $n_{\mathrm{test}}=360$ in each replication. The model $P_{X_j^{\mathrm{test}}}$ is the true conditional response law at test covariate $X_j^{\mathrm{test}}$, and $\widehat P_{X_j^{\mathrm{test}},B}$ is its forest estimate. The primary distributional metric is squared MMD to this known true conditional law:
+\begin{equation}\label{eq:ffmmdrisk}
+ \widehat{\mathcal R}_{\mathrm{MMD}}
+ =\frac1{n_{\mathrm{test}}}\sum_{j=1}^{n_{\mathrm{test}}}
+  \MMD_{k_h}^2\bigl(\widehat P_{X_j^{\mathrm{test}},B},P_{X_j^{\mathrm{test}}}\bigr).
+\end{equation}
+This quantity is evaluated using exact Gaussian convolution formulas for normal laws and Gaussian mixtures; the Student alternative uses $4096$-point deterministic midpoint quantile quadrature. Both the empirical-law/Student cross term and the Student/Student kernel expectation use this rule. With the two fitted estimators fixed at the first tail-shape replication, increasing the grid from $4096$ to $8192$ changes the mean conditional squared MMD by at most $\QuadratureMeanChange$ and any individual query score by at most $\QuadratureMaxChange$. These changes are much smaller than the reported Monte Carlo errors. This is a convergence diagnostic for that replication, rather than a uniform error bound over all fitted estimators. The evaluation kernel $k_h$ is the same Gaussian family used for the Fourier features, but the score uses the exact Gaussian kernel, independently of the feature approximation.
+
+As a complementary metric, let $\Lambda$ denote a specified real-valued functional on probability measures. We evaluate its mean absolute conditional estimation error:
+\begin{equation}\label{eq:fffunctional}
+  \widehat{\mathcal R}_{\Lambda}=\frac1{n_{\mathrm{test}}}
+ \sum_{j=1}^{n_{\mathrm{test}}}
+  \left|\Lambda(\widehat P_{X_j^{\mathrm{test}},B})-\Lambda(P_{X_j^{\mathrm{test}}})\right|.
+\end{equation}
+The chosen functionals $\Lambda$ are conditional variance for \eqref{eq:ffvariance}, $P(|Y|\le1\mid X=x)$ for \eqref{eq:fftail}, $P(|Y|\le0.5\mid X=x)$ for \eqref{eq:ffmix}, and conditional covariance $\operatorname{Cov}(Y^{(1)},Y^{(2)}\mid X=x)$ for \eqref{eq:ffdep}. The tail-shape target measures probability in the central region, which changes along with the tails. A held-out Gaussian-kernel score is also recorded as a prediction diagnostic. Its expectation equals the conditional MMD risk plus a true-law-dependent constant.
+
+Monte Carlo standard errors (MCSEs) use the $R=25$ independent datasets as the replication units. For each metric, let $d_r$ be the error of RFF--MMD minus the error of mean-CART on the same dataset $r$. We report
+\begin{equation}\label{eq:pairedmcse}
+ \overline d=\frac1R\sum_{r=1}^R d_r,\qquad
+ \operatorname{MCSE}(\overline d)=
+ \sqrt{\frac{1}{R(R-1)}\sum_{r=1}^R(d_r-\overline d)^2}.
+\end{equation}
+A negative contrast favors RFF--MMD. The test covariates and individual trees are not independent Monte Carlo replications. These MCSEs describe simulation precision, rather than uncertainty intervals for a conditional law estimated from one training dataset.
+
+\subsection{Results: Conditional Distribution and Functional Accuracy}
+\begin{table}[htbp]
+\centering\small
+\caption{Full-forest distributional estimation error: mean $\pm$ MCSE across 25 independent datasets. Smaller conditional MMD$^2$ indicates a more accurate estimate of $P_{Y\mid X=x}$. The Student alternative uses deterministic quadrature.}
+\label{tab:ffmmd}
+\input{forest_mmd_rows.tex}
+\end{table}
+
+\begin{table}[htbp]
+\centering\small
+\caption{Full-forest mean absolute errors for scenario-specific conditional functionals, mean $\pm$ MCSE. Functional scales differ across scenarios.}
+\label{tab:fffunction}
+\input{forest_functional_rows.tex}
+\end{table}
+
+\begin{figure}[htbp]
+\centering
+\includegraphics[width=\linewidth]{drf_full_forest_scores.pdf}
+\caption{Full-forest comparison in four settings. The upper-left panel shows conditional squared MMD to the true law; four separate panels show errors in the selected functionals on their respective scales. Error bars equal $1.96$ individual-method MCSEs across independent datasets; paired comparisons appear in Table~\ref{tab:ffpaired}.}
+\label{fig:fullforest}
+\end{figure}
+
+\begin{table}[htbp]
+\centering\small
+\caption{Paired error contrasts, RFF--MMD minus mean-CART: mean difference $\pm$ paired MCSE over 25 independent datasets. Negative values favor RFF--MMD. Functional units differ across scenarios.}
+\label{tab:ffpaired}
+\input{forest_paired_rows.tex}
+\end{table}
+
+The primary distributional metric in Table~\ref{tab:ffmmd} favors mean-CART for variance, tail shape, and bimodality; RFF--MMD has a smaller error for dependence. The functional results differ: RFF--MMD yields smaller errors for conditional variance, the modality-sensitive probability, and conditional covariance. For covariance, mean absolute error decreases from $\CovarianceMeanMAE$ to $\CovarianceRFFMAE$. The central probability in the tail-shape setting favors mean-CART ($\TailMeanMAE$ compared with $\TailRFFMAE$). Table~\ref{tab:ffpaired} quantifies the matched comparisons directly, using the dataset as the unit of replication. Figure~\ref{fig:fullforest} displays the individual-method means.
+
+\subsection{Interpretation and Scope}
+This study extends the root-split illustration to \emph{complete forests}, with predictions formed from adaptive probability weights. RFF--MMD improves three selected functionals but does not improve the primary conditional MMD metric in three of the four settings. A bounded Gaussian-kernel discrepancy and an error in a selected variance, covariance, or event probability assess different aspects of estimation. Better recovery of one functional therefore does not imply a smaller global embedding error. The matched-moment bimodality example is informative because the first two conditional moments agree across regimes while a central probability changes. Fixed Fourier features, bandwidth, leaf size, and lack of honesty are possible influences on the observed rankings; this experiment does not isolate their individual effects. Comparisons with official honest DRF, Fourier-feature and bandwidth ablations, and smooth conditional-law designs would help distinguish these explanations.
+
+\section{Discussion and Possible Research Directions}\label{sec:discussion}
+The assigned papers provide a coherent framework for conditional distribution learning and its inference: MMD-based partitions define a conditional kernel embedding estimator, and half-sampling approximates its sampling distribution under regularity assumptions. Our analytical change-point result explains how distribution-sensitive splitting identifies heterogeneity in conditional laws with constant means. The root-split simulations confirm that a suitably targeted transformation such as $Y^2$ can also exploit variance changes. The full-forest study establishes a complementary empirical finding: distribution-oriented splitting can improve important conditional functionals, although general distributional risk and the behavior under heavy tails warrant separate assessment.
+
+\paragraph{Kernel choice and forest construction.}
+The root-split bandwidth study reveals sensitivity to kernel scale. The full-forest study uses one fixed bandwidth and one fixed Fourier representation per fitted ensemble. A useful next investigation would vary $h$, the number of random Fourier frequencies, minimum leaf size, and split-honesty settings, selecting hyperparameters on a separate validation sample. The published DRF algorithm \cite{cevid2022} and its own inference procedure \cite{naf2023} provide the natural methods for this follow-up. The smaller conditional MMD errors of the mean-oriented baseline in three experiments indicate that gains in one distributional target can coincide with losses in a global embedding metric.
+
+\paragraph{Smoothness and uncertainty quantification.}
+The distributional regimes in our numerical studies change abruptly at $x^{(1)}=1/2$. For the scalar-covariate setting, one smooth Gaussian variance transition is
+\begin{equation}\label{eq:smoothvariance}
+ Y\mid X=x\sim N\bigl(0,v_\varepsilon(x)\bigr),\qquad
+ v_\varepsilon(x)=1+3\bigl[1+\exp\{-(x-1/2)/\varepsilon\}\bigr]^{-1},\quad \varepsilon>0.
+\end{equation}
+Here $\varepsilon$ controls the width of the variance transition. For each fixed $\varepsilon>0$, the Gaussian conditional kernel embedding changes smoothly with $x$. Comparing distributional estimation error across values of $\varepsilon$ would connect the numerical designs more closely to the smoothness conditions in the theoretical analysis. A further extension would evaluate uncertainty coverage using honest DRF and the half-sampling methods of N\"af et al.\ \cite{naf2023}, for which careful implementation of the relevant asymptotic assumptions is required.
+
+\section{Conclusion}\label{sec:conclusion}
+The assigned papers establish a general approach to estimating conditional response distributions with forests and to quantifying sampling uncertainty in the associated RKHS. Our population analysis proves change-point identification by balanced MMD splitting under piecewise constant conditional laws. Root-split simulations demonstrate the benefits of both MMD and a targeted second-moment transformation in a variance-change example. A new full-forest experiment evaluates distributional predictions across variance, tail, modality, and dependence changes. The RFF--MMD forest improves three selected conditional functionals, including covariance; mean-CART has lower primary conditional MMD error in three of four settings, with RFF--MMD ahead for dependence. These target-dependent rankings are reported with paired Monte Carlo errors. The combined investigation highlights the effect of forest splitting objectives on different statistical targets and identifies kernel tuning, honesty, smoothness, and inference calibration as directions for further work.
+
+\appendix
+\section{Derivation of the Hilbert-Space Splitting Identity}\label{app:anova}
+For $i$ in a parent node index set $P$, define $z_i=\varphi(Y_i)\in\calH$. For any nonempty node index set $A$, write $\overline z_A=|A|^{-1}\sum_{i\in A}z_i$, and let $a\in\calH$ be arbitrary. The Hilbert-space decomposition
+\[
+ \sum_{i\in A}\norm{z_i-a}_{\calH}^2
+ =\sum_{i\in A}\norm{z_i-\overline z_A}_{\calH}^2
+  +|A|\norm{\overline z_A-a}_{\calH}^2
+\]
+holds because $\sum_{i\in A}(z_i-\overline z_A)=0$. Apply this separately to $L$ and $R$ with $a=\overline z_P$ and divide by $n_P$:
+\[
+ \widehat V_P=\frac{n_L}{n_P}\widehat V_L+\frac{n_R}{n_P}\widehat V_R
+ +\frac{n_L}{n_P}\norm{\overline z_L-\overline z_P}_{\calH}^2
+ +\frac{n_R}{n_P}\norm{\overline z_R-\overline z_P}_{\calH}^2.
+\]
+Because $\overline z_P=(n_L/n_P)\overline z_L+(n_R/n_P)\overline z_R$, the last two terms add to
+\[
+ \frac{n_Ln_R}{n_P^2}\norm{\overline z_L-\overline z_R}_{\calH}^2.
+\]
+The two sample embeddings are $\overline z_L=\mu_{\widehat P_L}$ and $\overline z_R=\mu_{\widehat P_R}$, so their squared difference is the empirical squared MMD. This proves \eqref{eq:anova}.
+
+\section{Reproducibility Notes}\label{app:reproduce}
+The accompanying \path{drf-experiments.zip} contains the project experiment code, per-replication CSV records, summaries, figures, software metadata, and a standalone copy of this report. All simulation results in this report correspond to the included scripts and saved records, using the parameters and seed schemes below. The implementation is independent of the authors' official DRF package.
+
+Use Python 3.10 with the pinned dependencies in \path{requirements.txt}. From the experiment repository, run:
+\begin{lstlisting}[style=pystyle,language=bash]
+python -m pip install -r requirements.txt
+python -m unittest discover -s tests -v
+python ST6242_DRF_extended_experiment.py
+python ST6242_DRF_full_forest_experiment.py \
+  --reps 25 --train 650 --test 360 --trees 180 \
+  --features 48 --min-leaf 12 --seed 7606242
+python build_report_inputs.py
+\end{lstlisting}
+The default output directory is \path{results/}. The first experiment creates \path{drf_main_splits.csv}, \path{drf_main_summary.csv}, \path{drf_main_paired.csv}, the corresponding bandwidth files, and three figures. It uses one sequential NumPy \texttt{default\_rng(6242)} stream for the main comparison and \texttt{default\_rng(6243)} for bandwidth sensitivity. Split candidates satisfy the $15\%$ minimum-child constraint; maximizing thresholds are midpoints of adjacent distinct sorted covariates. The exact empirical MMD includes diagonal kernel entries.
+
+The file \path{drf_full_forest_replicates.csv} records every paired full-forest repetition. Additional CSV files contain summaries, paired contrasts, and quadrature diagnostics. For zero-based scenario index $s\in\{0,1,2,3\}$, ordered as variance, tail shape, bimodality, and dependence, and replication index $r$, independent streams use NumPy \texttt{SeedSequence([7606242,s,r,j])}. The index $j$ equals $0$ for training data, $1$ for test data, $2$ for Fourier features, and $3$ for the common forest seed. Paired fits use the same forest seed and hence matched bootstrap draws. Bootstrap multiplicities are included in all weights, and each fit checks that weighted predictions reproduce the library's predictions. The Student quadrature diagnostic holds the first tail-shape replication's estimators fixed while varying the integration grid.
+
+The metadata JSON files record model settings, Python and package versions, and SHA-256 hashes of the experiment source files. The table rows and numerical macros used in this report are generated directly from the CSV summaries by \path{build_report_inputs.py}. Changes in a simulation should be followed by rerunning that script and recompiling \path{report/main.tex}.
+
+The authors' official DRF implementation and application experiments are available at \url{https://github.com/lorismichel/drf}, with applications under \path{applications/}. The 2023 inference paper supplies its own figure-generation code at \url{https://github.com/JeffNaef/drfinference}. These are separate from the present project's RFF--MMD bootstrap implementation.
+
+\begin{thebibliography}{99}
+\bibitem{athey2019}
+S. Athey, J. Tibshirani, and S. Wager (2019).
+Generalized random forests.
+\emph{The Annals of Statistics}, 47(2), 1148--1178.
+\url{https://doi.org/10.1214/18-AOS1709}.
+
+\bibitem{breiman2001}
+L. Breiman (2001).
+Random forests.
+\emph{Machine Learning}, 45, 5--32.
+\url{https://doi.org/10.1023/A:1010933404324}.
+
+\bibitem{cevid2022}
+D. \'{C}evid, L. Michel, J. N\"af, P. B\"uhlmann, and N. Meinshausen (2022).
+Distributional random forests: Heterogeneity adjustment and multivariate distributional regression.
+\emph{Journal of Machine Learning Research}, 23(333), 1--79.
+\url{https://www.jmlr.org/papers/v23/21-0585.html}.
+
+\bibitem{gretton2012}
+A. Gretton, K. M. Borgwardt, M. J. Rasch, B. Sch\"olkopf, and A. Smola (2012).
+A kernel two-sample test.
+\emph{Journal of Machine Learning Research}, 13, 723--773.
+\url{https://www.jmlr.org/papers/v13/gretton12a.html}.
+
+\bibitem{jainluedtke2026}
+S. Jain and A. Luedtke (2026).
+Conditional distributional treatment effects: Doubly robust estimation and testing.
+In \emph{Proceedings of the 43rd International Conference on Machine Learning}, PMLR 306, 50417--50473.
+\url{https://proceedings.mlr.press/v306/jain26a.html}.
+
+\bibitem{kundulinero2026}
+P. Kundu and A. R. Linero (2026).
+Conditional distribution estimation for functional responses with random forests.
+\emph{arXiv preprint} arXiv:2608.08247.
+\url{https://arxiv.org/abs/2608.08247}.
+
+\bibitem{meinshausen2006}
+N. Meinshausen (2006).
+Quantile regression forests.
+\emph{Journal of Machine Learning Research}, 7, 983--999.
+\url{https://www.jmlr.org/papers/v7/meinshausen06a.html}.
+
+\bibitem{naf2023}
+J. N\"af, C. Emmenegger, P. B\"uhlmann, and N. Meinshausen (2023).
+Confidence and uncertainty assessment for distributional random forests.
+\emph{Journal of Machine Learning Research}, 24(366), 1--77.
+\url{https://www.jmlr.org/papers/v24/23-0185.html}.
+
+\bibitem{nafpark2026}
+J. N\"af, J. Park, and H. Susmann (2026).
+Causal-DRF: Conditional kernel treatment effect estimation using distributional random forest.
+In \emph{Proceedings of the 29th International Conference on Artificial Intelligence and Statistics}, PMLR 300, 1000--1008.
+\url{https://proceedings.mlr.press/v300/naf26a.html}.
+
+\bibitem{wagerathey2018}
+S. Wager and S. Athey (2018).
+Estimation and inference of heterogeneous treatment effects using random forests.
+\emph{Journal of the American Statistical Association}, 113(523), 1228--1242.
+\url{https://doi.org/10.1080/01621459.2017.1319839}.
+\end{thebibliography}
+\end{document}
