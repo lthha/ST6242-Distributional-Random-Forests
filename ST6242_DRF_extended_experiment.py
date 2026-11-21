@@ -7,7 +7,8 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import numpy as np
 
-from drf_core import candidate_splits, cart_scores, mmd_split_scores, mean_mcse, write_csv, write_metadata
+from drf_core import (candidate_splits, cart_scores, mmd_split_scores, mean_mcse, write_csv, write_metadata,
+                      report_style, TEXT_WIDTH_IN)
 
 
 def sample(rng, n):
@@ -94,36 +95,36 @@ def main():
         paired_bandwidth.append({"h": h, "reference_h": 1.0, "mean_difference": mean, "paired_mcse": mcse})
     write_csv(args.output / "drf_bandwidth_paired.csv", paired_bandwidth)
 
-    plt.rcParams.update({"font.size": 10, "pdf.fonttype": 42})
+    report_style()
     t = np.linspace(0.001, 0.999, 999)
     score = np.where(t <= 0.5, t / (1 - t), (1 - t) / t)
-    fig, ax = plt.subplots(figsize=(6.3, 3.2))
-    ax.plot(t, score, label="MMD: normalized score", linewidth=2)
-    ax.plot(t, score, label=r"CART on $Y^2$: normalized score", linestyle=":", linewidth=2)
+    fig, ax = plt.subplots(figsize=(0.79*TEXT_WIDTH_IN, 2.6))
+    ax.plot(t, score, label="MMD", linewidth=2)
+    ax.plot(t, score, label=r"CART on $Y^2$", linestyle=":", linewidth=2.2)
     ax.plot(t, np.zeros_like(t), label=r"CART on $Y$", linestyle="--")
     ax.axvline(0.5, color="grey", linestyle="--", linewidth=0.8)
-    ax.set(xlabel="Candidate split t", ylabel="Normalized population score", ylim=(-0.03, 1.05))
-    ax.legend(fontsize=8)
+    ax.set(xlabel=r"Candidate split $t$", ylabel="Normalized population score", ylim=(-0.03, 1.05))
+    ax.legend(loc="upper right")
     fig.tight_layout()
     fig.savefig(args.output / "drf_population_scores.pdf")
     plt.close(fig)
 
-    fig, axes = plt.subplots(1, 3, figsize=(9.2, 3), sharey=True)
+    fig, axes = plt.subplots(1, 3, figsize=(TEXT_WIDTH_IN, 2.6), sharey=True)
     for ax, n in zip(axes, [200, 400, 800]):
         methods = ["CART on Y", "CART on Y^2", "MMD (h=1)"]
         values = [[r["threshold"] for r in main_records if r["n"] == n and r["method"] == m] for m in methods]
-        ax.boxplot(values, labels=[r"CART $Y$", r"CART $Y^2$", "MMD"], showfliers=False)
+        ax.boxplot(values, labels=["CART\non $Y$", "CART\non $Y^2$", "MMD"], showfliers=False)
         ax.axhline(0.5, color="grey", linestyle="--", linewidth=0.8)
-        ax.set(title=f"n={n}", ylim=(0, 1))
+        ax.set(title=f"$n={n}$", ylim=(0, 1))
     axes[0].set_ylabel("Estimated root split")
     fig.tight_layout()
     fig.savefig(args.output / "drf_split_boxplots.pdf")
     plt.close(fig)
 
-    fig, ax = plt.subplots(figsize=(5.8, 3.2))
+    fig, ax = plt.subplots(figsize=(0.77*TEXT_WIDTH_IN, 2.6))
     ax.errorbar([r["h"] for r in bandwidth_summary], [r["mean_abs_error"] for r in bandwidth_summary],
                 yerr=[1.96 * r["mcse"] for r in bandwidth_summary], marker="o", capsize=3)
-    ax.set(xlabel="Gaussian bandwidth h", ylabel="Mean absolute split error")
+    ax.set(xlabel=r"Gaussian bandwidth $h$", ylabel="Mean absolute split error")
     fig.tight_layout()
     fig.savefig(args.output / "drf_bandwidth_sensitivity.pdf")
     plt.close(fig)

@@ -10,7 +10,7 @@ The full-forest experiment uses fixed random Fourier features and ordinary non-h
 
 ## Reproduce
 
-Use Python 3.10 with the versions in `requirements.txt`. The supplied versions match the recorded execution environment. Numerical details can vary with other library versions or platforms.
+Use Python 3.10 with the versions in `requirements.txt`. Figures are typeset with LaTeX through Matplotlib's `usetex` option (Latin Modern, matching the report), so a TeX installation such as TeX Live is required. The supplied versions match the recorded execution environment. Numerical details can vary with other library versions or platforms.
 
 ```sh
 python3.10 -m venv .venv
@@ -19,6 +19,7 @@ python -m pip install -r requirements.txt
 python -m unittest discover -s tests -v
 python ST6242_DRF_extended_experiment.py
 python ST6242_DRF_full_forest_experiment.py
+python ST6242_DRF_smooth_experiment.py
 python build_report_inputs.py
 cd report
 latexmk -pdf -interaction=nonstopmode -halt-on-error main.tex
@@ -43,6 +44,8 @@ The full-forest study uses 25 repetitions per setting; 650 training observations
 
 For full-forest scenario index `s` in `[variance, tail, bimodality, dependence]` and zero-based repetition `r`, independent streams use `SeedSequence([7606242, s, r, j])`, with `j=0` for training data, `j=1` for test data, `j=2` for Fourier features, and `j=3` for the common forest seed. Each paired fit uses the same covariates, responses, bootstrap seed, and tree parameters. The bootstrap counts are reconstructed from each tree's stored random seed. Weighted leaf predictions are checked against scikit-learn's predictions in every fit.
 
+The smooth-transition study replaces the variance step by `Var(Y | X=x) = 1 + 3 / (1 + exp(-(x1 - 0.5)/eps))` for `eps` in `[step, 0.025, 0.05, 0.1, 0.2]`, with otherwise identical forest settings, bandwidth 1, and 25 paired repetitions per width using `SeedSequence([7606243, e, r, j])`.
+
 ## Scores and uncertainty
 
 The primary metric is mean conditional squared MMD between the weighted empirical forest law and the known true law, using exact Gaussian kernel values. Normal and Gaussian-mixture expectations are analytic; the Student law uses 4096 deterministic midpoint quantiles. The first fitted tail replicate is also scored with 1024, 2048, 4096, and 8192 points, keeping fitted estimators fixed. This is a numerical convergence diagnostic, not a uniform integration-error bound.
@@ -51,10 +54,13 @@ Functional errors target variance, a central probability, a modality-sensitive p
 
 MCSE is the sample standard deviation across independent datasets divided by the square root of the number of datasets. Paired files compute this quantity from within-dataset error differences. In the full-forest contrast, a negative difference favors RFF-MMD. Query points and trees are not independent Monte Carlo replicates. Error bars on individual-method plots do not replace the paired contrasts.
 
+Every full-forest and smooth record also stores an exact bias-remainder decomposition of the conditional MMD^2. The bias is `||sum_i w_i mu(X_i) - mu(x)||^2`, which equals `m^2 D_h` for step designs, where `m` is the weight on opposite-regime training points and `D_h` the between-regime squared MMD (`drf_regime_discrepancy.csv`). The records also store the remainder, the honest-weight noise proxy `sum_i w_i^2 (1 - ||mu(X_i)||^2)`, and the effective sample size `1 / sum_i w_i^2`.
+
 ## Files
 
 - `ST6242_DRF_extended_experiment.py`: root-split and bandwidth experiments and three figures.
 - `ST6242_DRF_full_forest_experiment.py`: paired forest experiments, quadrature check, and comparison figure.
+- `ST6242_DRF_smooth_experiment.py`: paired forests under smooth variance transitions and their figure.
 - `drf_core.py`: exact MMD, forest weights, summaries, metadata.
 - `tests/test_experiments.py`: numerical checks against direct calculations, integration, and library predictions.
 - `build_report_inputs.py`: CSV-to-LaTeX tables and numeric macros.
@@ -63,7 +69,7 @@ MCSE is the sample standard deviation across independent datasets divided by the
 - `results/*.pdf`: generated figures.
 - `report/`: revised standalone LaTeX report and generated inputs.
 
-The project code and records are distinct from the authors' implementations: [DRF package and applications](https://github.com/lorismichel/drf) and [2023 inference-paper experiments](https://github.com/JeffNaef/drfinference). These links are also supplied in the report's reproducibility appendix.
+The project code and records are distinct from the authors' implementations: [DRF package and applications](https://github.com/lorismichel/drf) and [2023 inference-paper experiments](https://github.com/JeffNaef/drfinference).
 
 ## Publish to your GitHub account
 

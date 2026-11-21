@@ -17,13 +17,13 @@
     "features": 48,
     "min_leaf": 12,
     "seed": 7606242,
-    "jobs": 2,
+    "jobs": 4,
     "quadrature": 4096,
     "output": "results"
   },
   "source_sha256": {
-    "ST6242_DRF_full_forest_experiment.py": "5f99dd605bbf471e8fb8e0842d36cdb469a683b5d0b9149d07fbc48cffc21064",
-    "drf_core.py": "487eec82193bfa044460c070540d844cc1aa5c3760f8e805e6315326cabeadab"
+    "ST6242_DRF_full_forest_experiment.py": "f926d7d7f0fe391bde73eca719d58b1deecec2174883545d4c65e8cb6ac39a93",
+    "drf_core.py": "ec9350f1607207297b969fbdfc44f7ef0a20d2a18dad83a759007c28d62f65e2"
   },
   "provenance": "New implementation of the draft's stated designs; original scripts were unavailable."
 }

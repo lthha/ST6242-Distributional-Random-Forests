@@ -10,6 +10,25 @@ import numpy as np
 from scipy.spatial.distance import cdist
 
 
+# \linewidth of the report (a4paper, 1in margins) in inches. Figures are drawn
+# at the width at which they are included, so fonts print at their nominal size.
+TEXT_WIDTH_IN = 452.9679 / 72.27
+
+
+def report_style():
+    """Matplotlib settings matching the report: LaTeX with Latin Modern (lmodern, T1)."""
+    import matplotlib.pyplot as plt
+    plt.rcParams.update({
+        "text.usetex": True,
+        "font.family": "serif",
+        "text.latex.preamble": r"\usepackage[T1]{fontenc}\usepackage{lmodern}\usepackage{amsmath}",
+        "font.size": 10, "axes.titlesize": 10, "axes.labelsize": 10,
+        "xtick.labelsize": 9, "ytick.labelsize": 9, "legend.fontsize": 9,
+        "legend.handlelength": 1.6, "legend.borderaxespad": 0.4,
+        "pdf.fonttype": 42,
+    })
+
+
 def gaussian_kernel(y, z, bandwidth=1.0):
     y = np.asarray(y).reshape(len(y), -1)
     z = np.asarray(z).reshape(len(z), -1)

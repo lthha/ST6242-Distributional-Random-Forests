@@ -8,7 +8,8 @@ import numpy as np
 from scipy import stats
 from sklearn.ensemble import RandomForestRegressor
 from drf_core import candidate_splits, mmd_split_scores, gaussian_kernel, forest_weights
-from ST6242_DRF_full_forest_experiment import normal_embedding, normal_self, law_embeddings, functional_errors, conditional_risk
+from ST6242_DRF_full_forest_experiment import normal_embedding, normal_self, law_embeddings, functional_errors, conditional_risk, regime_gram, risk_decomposition
+import ST6242_DRF_smooth_experiment as smooth
 
 
 class ExperimentChecks(unittest.TestCase):
@@ -65,6 +66,37 @@ class ExperimentChecks(unittest.TestCase):
         cross = np.column_stack((kernel[:, 0], kernel[:, 1]))
         risk = conditional_risk(np.eye(2), kernel, np.array([0, 1]), cross, np.ones(2))
         np.testing.assert_allclose(risk, 0, atol=1e-14)
+
+    def test_regime_gram_against_independent_formulas(self):
+        from scipy.integrate import quad
+        self.assertAlmostEqual(regime_gram("variance", 1.0)[0, 1], 1/np.sqrt(6), places=14)
+        self.assertAlmostEqual(regime_gram("dependence", 1.4)[0, 1], 1/(1 + 2/1.96), places=14)
+        a, var = .95, 1 - .95**2
+        self.assertAlmostEqual(regime_gram("bimodality", 1.0)[0, 1],
+                               np.exp(-a*a/(2*(2+var)))/np.sqrt(2+var), places=14)
+        # E k(Z, T) with Z ~ N(0,1) and T ~ t_3/sqrt(3), integrating over T.
+        density = lambda t: np.sqrt(3)*stats.t.pdf(np.sqrt(3)*t, df=3)
+        exact = quad(lambda t: np.exp(-t*t/4)/np.sqrt(2)*density(t), -np.inf, np.inf)[0]
+        self.assertAlmostEqual(regime_gram("tail", 1.0)[0, 1], exact, places=6)
+        gram = regime_gram("variance", 1.0)
+        distance = gram[0, 0] + gram[1, 1] - 2*gram[0, 1]
+        self.assertAlmostEqual(distance, 1/np.sqrt(3) + 1/3 - 2/np.sqrt(6), places=14)
+
+    def test_step_decomposition_matches_general_bias_formula(self):
+        rng = np.random.default_rng(3)
+        n, q = 40, 9
+        weights = rng.dirichlet(np.ones(n), size=q)
+        train_t, test_t = rng.uniform(size=n), rng.uniform(size=q)
+        y = rng.normal(size=n) * np.sqrt(smooth.variance_function(train_t, 0))
+        v_train, v_test = smooth.variance_function(train_t, 0), smooth.variance_function(test_t, 0)
+        kernel = gaussian_kernel(y, y)
+        risk, bias = smooth.conditional_risk(weights, kernel, y, v_train, v_test, 1.0)
+        groups, train_groups = (test_t > .5).astype(int), (train_t > .5).astype(int)
+        cross, pp = law_embeddings(y[:, None], "variance", 1.0)
+        np.testing.assert_allclose(risk, conditional_risk(weights, kernel, groups, cross, pp), atol=1e-13)
+        parts = risk_decomposition(weights, train_groups, groups, regime_gram("variance", 1.0))
+        np.testing.assert_allclose(bias, parts["bias"], atol=1e-13)
+        np.testing.assert_allclose(parts["n_eff"], 1/np.sum(weights**2, axis=1))
 
 
 if __name__ == "__main__":
