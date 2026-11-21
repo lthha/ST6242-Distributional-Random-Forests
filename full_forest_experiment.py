@@ -195,8 +195,8 @@ def plot_forest_figures(summaries, output):
     main_ax.set_ylim(0, 0.0235)
     main_ax.yaxis.set_major_locator(plt.MaxNLocator(5))
     main_ax.legend(loc="upper left", ncol=1)
-    titles = [r"Variance: $|\widehat{\mathrm{var}}-\mathrm{var}|$", r"Tail: $P(|Y|\le 1)$",
-              r"Bimodality: $P(|Y|\le 0.5)$", r"Dependence: $|\widehat{\mathrm{cov}}-\mathrm{cov}|$"]
+    titles = [r"Variance: $|\widehat{\mathrm{var}}-\mathrm{var}|$", r"Tail: $P(|Y|\leq 1)$",
+              r"Bimodality: $P(|Y|\leq 0.5)$", r"Dependence: $|\widehat{\mathrm{cov}}-\mathrm{cov}|$"]
     for k, (scenario, title) in enumerate(zip(SCENARIOS, titles)):
         ax = fig.add_subplot(grid[k // 2, 1 + k % 2])
         rows = [row(scenario, m) for m in METHODS]

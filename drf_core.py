@@ -4,7 +4,10 @@ import csv
 import hashlib
 import importlib.metadata
 import json
+import os
 import platform
+import shutil
+import warnings
 
 import numpy as np
 from scipy.spatial.distance import cdist
@@ -16,17 +19,29 @@ TEXT_WIDTH_IN = 452.9679 / 72.27
 
 
 def report_style():
-    """Matplotlib settings matching the report: LaTeX with Latin Modern (lmodern, T1)."""
+    """Matplotlib settings matching the report: LaTeX with Latin Modern (lmodern, T1).
+
+    Without a LaTeX installation (for example on a CI runner), or with
+    DRF_NO_USETEX=1, figures fall back to Matplotlib's built-in mathtext with
+    Computer Modern math. Results are unaffected; only the figure fonts differ.
+    """
     import matplotlib.pyplot as plt
-    plt.rcParams.update({
-        "text.usetex": True,
+    settings = {
         "font.family": "serif",
-        "text.latex.preamble": r"\usepackage[T1]{fontenc}\usepackage{lmodern}\usepackage{amsmath}",
         "font.size": 10, "axes.titlesize": 10, "axes.labelsize": 10,
         "xtick.labelsize": 9, "ytick.labelsize": 9, "legend.fontsize": 9,
         "legend.handlelength": 1.6, "legend.borderaxespad": 0.4,
         "pdf.fonttype": 42,
-    })
+    }
+    if shutil.which("latex") and os.environ.get("DRF_NO_USETEX") != "1":
+        settings.update({
+            "text.usetex": True,
+            "text.latex.preamble": r"\usepackage[T1]{fontenc}\usepackage{lmodern}\usepackage{amsmath}",
+        })
+    else:
+        warnings.warn("LaTeX not found or disabled; figures use mathtext instead of the report fonts.")
+        settings.update({"text.usetex": False, "mathtext.fontset": "cm"})
+    plt.rcParams.update(settings)
 
 
 def gaussian_kernel(y, z, bandwidth=1.0):

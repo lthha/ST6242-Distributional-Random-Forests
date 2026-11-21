@@ -1,76 +1,50 @@
-# ST6242: Distributional random forest experiments
+# Distributional Random Forests: Experiments
 
-Companion experiments for Le Thi Hong Ha's final project on distributional random forests. The repository includes executable simulations, per-replication records, Monte Carlo summaries, paired method contrasts, a Student-law quadrature check, figures, and the revised LaTeX report.
+Code and results for my ST6242 final project on distributional random forests (DRF). The experiments compare mean-based and MMD-based splitting when the conditional distribution changes but the conditional mean does not.
 
-## Provenance
+The forests here use fixed random Fourier features and ordinary (non-honest) bootstrap trees, so they approximate MMD splitting rather than implement the official DRF algorithm. For the authors' code, see the [DRF package](https://github.com/lorismichel/drf) and the [inference-paper experiments](https://github.com/JeffNaef/drfinference).
 
-The original draft's scripts were unavailable. These scripts implement its stated designs anew. The root-split and bandwidth runs reproduce all numbers printed in the original draft at the reported precision. The full-forest study was rerun with the explicit seed scheme below; the revised report uses this run's results throughout. The earlier full-forest numbers must not be attributed to these scripts.
+## Running
 
-The full-forest experiment uses fixed random Fourier features and ordinary non-honest bootstrap trees. It is an approximation to the MMD splitting principle. It does not implement the official honest DRF algorithm or half-sampling inference and does not empirically validate their asymptotic guarantees.
-
-## Reproduce
-
-Use Python 3.10 with the versions in `requirements.txt`. Figures are typeset with LaTeX through Matplotlib's `usetex` option (Latin Modern, matching the report), so a TeX installation such as TeX Live is required. The supplied versions match the recorded execution environment. Numerical details can vary with other library versions or platforms.
+Python 3.10 with the versions in `requirements.txt`. All data are simulated; nothing is downloaded.
 
 ```sh
-python3.10 -m venv .venv
-source .venv/bin/activate
-python -m pip install -r requirements.txt
+python -m venv .venv && source .venv/bin/activate
+pip install -r requirements.txt
 python -m unittest discover -s tests -v
-python ST6242_DRF_extended_experiment.py
-python ST6242_DRF_full_forest_experiment.py
-python ST6242_DRF_smooth_experiment.py
-python build_report_inputs.py
-cd report
-latexmk -pdf -interaction=nonstopmode -halt-on-error main.tex
+python root_split_experiment.py         # root splits and bandwidths
+python full_forest_experiment.py        # full forests, four designs
+python smooth_transition_experiment.py  # smooth variance transitions
 ```
 
-The experiments do not download datasets or require an account. All data are synthetic. Outputs go to `results/`. Both scripts support `--help`; use a different `--output` directory for exploratory runs so the supplied results stay intact. `build_report_inputs.py` generates table rows and numeric macros from CSVs and copies the matching figures into `report/`.
+Results go to `results/`. Each script accepts `--help`; pass a different `--output` for exploratory runs so the saved results are not overwritten.
 
-For a quick execution check, without replacing the reported results:
+Figures are typeset with LaTeX to match the report fonts. Without a TeX installation (or with `DRF_NO_USETEX=1`), Matplotlib's built-in math rendering is used instead; the numbers are unaffected. This is how the GitHub Actions smoke tests run:
 
 ```sh
-python ST6242_DRF_extended_experiment.py --reps 3 --bandwidth-reps 3 --output /tmp/drf-root-smoke
-python ST6242_DRF_full_forest_experiment.py --reps 2 --train 80 --test 20 --trees 5 --features 8 --min-leaf 5 --output /tmp/drf-forest-smoke
+python root_split_experiment.py --reps 3 --bandwidth-reps 3 --output /tmp/drf-root-smoke
+python full_forest_experiment.py --reps 2 --train 80 --test 20 --trees 5 --features 8 --min-leaf 5 --output /tmp/drf-forest-smoke
+python smooth_transition_experiment.py --reps 2 --train 80 --test 20 --trees 5 --features 8 --min-leaf 5 --output /tmp/drf-smooth-smoke
 ```
 
-If using the original Mac's Intel Python installation on Apple Silicon, prefix commands with `arch -x86_64`. This is specific to that installation, not a requirement of the code. Setting `MPLCONFIGDIR` to a writable directory avoids Matplotlib cache warnings. To limit numerical-library threads, set `OPENBLAS_NUM_THREADS=1`, `OMP_NUM_THREADS=1`, and `VECLIB_MAXIMUM_THREADS=1` when running the scripts. The forest defaults to two workers and accepts `--jobs`.
+## Experiments
 
-## Designs
+**Root split.** `Y | X=x` is `N(0,1)` for `x <= 0.5` and `N(0,4)` otherwise. For 200 datasets at each `n = 200, 400, 800`, I compare the root split chosen by CART on `Y`, CART on `Y^2`, and exact Gaussian-kernel MMD (bandwidth 1). A second run uses 120 datasets of size 400 and bandwidths 0.25 to 4. Seeds: `default_rng(6242)` and `default_rng(6243)`.
 
-The root-split study uses 200 independent datasets at each of `n = 200, 400, 800`, with one sequential NumPy `default_rng(6242)` stream. All methods use each dataset, and each child must contain at least 15% of observations. Responses have mean zero and variance 1 or 4 across the threshold 0.5. Comparisons are CART on Y, CART on Y squared, and exact Gaussian-kernel MMD with bandwidth 1. A separate stream, `default_rng(6243)`, generates 120 datasets of size 400 for bandwidths 0.25, 0.5, 1, 2, and 4.
+**Full forests.** Four designs change the variance, the tail shape, the modality, or the bivariate dependence at `x1 = 0.5`, with three uniform covariates. Each repetition fits a mean-CART forest and an RFF-MMD forest (48 frequencies) on the same data and bootstrap draws: 650 training points, 360 test points, 180 trees, `max_features=2`, `min_samples_leaf=12`, 25 repetitions per design. Seeds: `SeedSequence([7606242, s, r, j])` for design `s`, repetition `r`, and stream `j` (0 training, 1 test, 2 Fourier features, 3 forest).
 
-The full-forest study uses 25 repetitions per setting; 650 training observations; 360 independent test pairs; 180 bootstrap trees; 48 Fourier frequencies, giving 96 sine/cosine outputs; `max_features=2`; and `min_samples_leaf=12`. Covariates are independent uniforms in three dimensions; the first coordinate determines the regime. Settings vary variance, tail shape at equal variance, modality at equal first two moments, and bivariate dependence at equal marginal laws. Bandwidth is 1 for scalar responses and 1.4 for the dependence setting.
+**Smooth transitions.** The variance step is replaced by `Var(Y | X=x) = 1 + 3 / (1 + exp(-(x1 - 0.5)/eps))` for `eps` in `step, 0.025, 0.05, 0.1, 0.2`, with the same forest settings. Seeds: `SeedSequence([7606243, e, r, j])`.
 
-For full-forest scenario index `s` in `[variance, tail, bimodality, dependence]` and zero-based repetition `r`, independent streams use `SeedSequence([7606242, s, r, j])`, with `j=0` for training data, `j=1` for test data, `j=2` for Fourier features, and `j=3` for the common forest seed. Each paired fit uses the same covariates, responses, bootstrap seed, and tree parameters. The bootstrap counts are reconstructed from each tree's stored random seed. Weighted leaf predictions are checked against scikit-learn's predictions in every fit.
+## Metrics
 
-The smooth-transition study replaces the variance step by `Var(Y | X=x) = 1 + 3 / (1 + exp(-(x1 - 0.5)/eps))` for `eps` in `[step, 0.025, 0.05, 0.1, 0.2]`, with otherwise identical forest settings, bandwidth 1, and 25 paired repetitions per width using `SeedSequence([7606243, e, r, j])`.
-
-## Scores and uncertainty
-
-The primary metric is mean conditional squared MMD between the weighted empirical forest law and the known true law, using exact Gaussian kernel values. Normal and Gaussian-mixture expectations are analytic; the Student law uses 4096 deterministic midpoint quantiles. The first fitted tail replicate is also scored with 1024, 2048, 4096, and 8192 points, keeping fitted estimators fixed. This is a numerical convergence diagnostic, not a uniform integration-error bound.
-
-Functional errors target variance, a central probability, a modality-sensitive probability, and covariance. Their scales differ. The held-out kernel score in the CSVs is the squared MMD to each observed test response's point mass. Its expectation equals the true-law MMD risk plus a law-dependent constant, so it is a complementary prediction score.
-
-MCSE is the sample standard deviation across independent datasets divided by the square root of the number of datasets. Paired files compute this quantity from within-dataset error differences. In the full-forest contrast, a negative difference favors RFF-MMD. Query points and trees are not independent Monte Carlo replicates. Error bars on individual-method plots do not replace the paired contrasts.
-
-Every full-forest and smooth record also stores an exact bias-remainder decomposition of the conditional MMD^2. The bias is `||sum_i w_i mu(X_i) - mu(x)||^2`, which equals `m^2 D_h` for step designs, where `m` is the weight on opposite-regime training points and `D_h` the between-regime squared MMD (`drf_regime_discrepancy.csv`). The records also store the remainder, the honest-weight noise proxy `sum_i w_i^2 (1 - ||mu(X_i)||^2)`, and the effective sample size `1 / sum_i w_i^2`.
+- **Conditional MMD².** Squared MMD between each forest's weighted empirical law and the true conditional law, computed exactly (the Student law uses 4096-point quadrature, checked against 8192).
+- **Functional error.** Absolute error for one target per design: variance, a central probability, a modality-sensitive probability, or covariance.
+- **Decomposition.** The MMD² is split into localization bias (`m^2 D_h` for step designs, where `m` is the weight on the wrong regime) and a remainder. The noise proxy and effective sample size are recorded alongside.
+- **Uncertainty.** Monte Carlo standard errors across datasets, and paired differences (RFF-MMD minus mean-CART; negative favors RFF-MMD).
 
 ## Files
 
-- `ST6242_DRF_extended_experiment.py`: root-split and bandwidth experiments and three figures.
-- `ST6242_DRF_full_forest_experiment.py`: paired forest experiments, quadrature check, and comparison figure.
-- `ST6242_DRF_smooth_experiment.py`: paired forests under smooth variance transitions and their figure.
-- `drf_core.py`: exact MMD, forest weights, summaries, metadata.
-- `tests/test_experiments.py`: numerical checks against direct calculations, integration, and library predictions.
-- `build_report_inputs.py`: CSV-to-LaTeX tables and numeric macros.
-- `results/*_metadata.json`: parameters, package versions, and SHA-256 hashes of experiment source files.
-- `results/*.csv`: per-replication records, method summaries, paired contrasts, and quadrature checks.
-- `results/*.pdf`: generated figures.
-- `report/`: revised standalone LaTeX report and generated inputs.
-
-The project code and records are distinct from the authors' implementations: [DRF package and applications](https://github.com/lorismichel/drf) and [2023 inference-paper experiments](https://github.com/JeffNaef/drfinference).
-
-## Publish to your GitHub account
-
-This directory is ready to upload as a repository. It contains no GitHub credentials and no assumed owner or remote URL. Include `results/` and `report/` so the checked numerical evidence accompanies the code. A hosted repository URL is available only after repository creation and upload to your account.
+- `drf_core.py`: kernels, MMD split scores, forest weights, summaries, figure style.
+- `root_split_experiment.py`, `full_forest_experiment.py`, `smooth_transition_experiment.py`: the three experiments.
+- `tests/`: checks against direct calculation, numerical integration, and scikit-learn predictions.
+- `results/`: per-repetition CSVs, summaries, paired contrasts, figures, and metadata (parameters, package versions, source hashes).

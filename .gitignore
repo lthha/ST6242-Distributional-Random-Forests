@@ -1,70 +1,19 @@
-# Local Python environments and caches
+# Python environments and caches
 .venv/
 venv/
 env/
 __pycache__/
 *.py[cod]
 .pytest_cache/
-.mypy_cache/
-.ruff_cache/
-.coverage
-.coverage.*
-htmlcov/
-*.egg-info/
 .ipynb_checkpoints/
 
-# Local operating-system and editor files
+# Operating-system and editor files
 .DS_Store
 ._*
 Thumbs.db
 .idea/
+.vscode/
 *.swp
-*.swo
-*~
 
-# Temporary builds; keep results/ and generated report inputs
-/build/
-/dist/
+# Scratch output (keep results/)
 /tmp/
-/temp/
-
-# LaTeX intermediate files
-*.aux
-*.log
-*.out
-*.fls
-*.fdb_latexmk
-*.synctex
-*.synctex.gz
-*.toc
-*.lof
-*.lot
-*.bbl
-*.blg
-*.bcf
-*.run.xml
-*.nav
-*.snm
-*.vrb
-*.dvi
-*.xdv
-*.lol
-*.thm
-*.loe
-*.acn
-*.acr
-*.alg
-*.glg
-*.glo
-*.gls
-*.ist
-*.idx
-*.ilg
-*.ind
-*.loa
-*.spl
-*.synctex(busy)
-*.synctex.gz(busy)
-
-# Compiled report; PDF figures in report/ and results/ are required assets
-/report/main.pdf

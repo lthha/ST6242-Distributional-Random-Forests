@@ -8,8 +8,8 @@ import numpy as np
 from scipy import stats
 from sklearn.ensemble import RandomForestRegressor
 from drf_core import candidate_splits, mmd_split_scores, gaussian_kernel, forest_weights
-from ST6242_DRF_full_forest_experiment import normal_embedding, normal_self, law_embeddings, functional_errors, conditional_risk, regime_gram, risk_decomposition
-import ST6242_DRF_smooth_experiment as smooth
+from full_forest_experiment import normal_embedding, normal_self, law_embeddings, functional_errors, conditional_risk, regime_gram, risk_decomposition
+import smooth_transition_experiment as smooth
 
 
 class ExperimentChecks(unittest.TestCase):
