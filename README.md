@@ -1,6 +1,6 @@
 # Distributional Random Forests: Experiments
 
-Code and results for my ST6242 final project on distributional random forests (DRF). The experiments compare mean-based and MMD-based splitting when the conditional distribution changes but the conditional mean does not.
+Code and figures for my ST6242 final project on distributional random forests (DRF). The experiments compare mean-based and MMD-based splitting when the conditional distribution changes but the conditional mean does not.
 
 The forests here use fixed random Fourier features and ordinary (non-honest) bootstrap trees, so they approximate MMD splitting rather than implement the official DRF algorithm. For the authors' code, see the [DRF package](https://github.com/lorismichel/drf) and the [inference-paper experiments](https://github.com/JeffNaef/drfinference).
 
@@ -17,7 +17,7 @@ python full_forest_experiment.py        # full forests, four designs
 python smooth_transition_experiment.py  # smooth variance transitions
 ```
 
-Results go to `results/`. Each script accepts `--help`; pass a different `--output` for exploratory runs so the saved results are not overwritten.
+Each script writes per-repetition CSVs, summaries, paired contrasts, metadata, and figures to `results/`; only the figures are tracked in the repository. Each script accepts `--help`; pass a different `--output` for exploratory runs.
 
 Figures are typeset with LaTeX to match the report fonts. Without a TeX installation (or with `DRF_NO_USETEX=1`), Matplotlib's built-in math rendering is used instead; the numbers are unaffected. This is how the GitHub Actions smoke tests run:
 
@@ -47,4 +47,4 @@ python smooth_transition_experiment.py --reps 2 --train 80 --test 20 --trees 5 -
 - `drf_core.py`: kernels, MMD split scores, forest weights, summaries, figure style.
 - `root_split_experiment.py`, `full_forest_experiment.py`, `smooth_transition_experiment.py`: the three experiments.
 - `tests/`: checks against direct calculation, numerical integration, and scikit-learn predictions.
-- `results/`: per-repetition CSVs, summaries, paired contrasts, figures, and metadata (parameters, package versions, source hashes).
+- `results/`: the figures used in the report.
