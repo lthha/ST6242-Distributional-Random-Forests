@@ -7,6 +7,7 @@ the design satisfies the smoothness assumption of the DRF consistency and
 inference theorems, while eps -> 0 recovers the discontinuous design.
 """
 import argparse
+import csv
 from pathlib import Path
 
 import matplotlib
@@ -61,7 +62,14 @@ def main():
         parser.add_argument("--"+flag, type=int, default=default)
     parser.add_argument("--bandwidth", type=float, default=1.0)
     parser.add_argument("--output", type=Path, default=Path("results"))
+    parser.add_argument("--plot-only", action="store_true",
+                        help="Redraw the figure from an existing drf_smooth_summary.csv in --output")
     args = parser.parse_args()
+    if args.plot_only:
+        plot_results(read_summary(args.output / "drf_smooth_summary.csv"),
+                     args.output / "drf_smooth_transition.pdf")
+        print("Smooth-transition figure redrawn.", flush=True)
+        return
     if args.reps < 2 or min(args.train, args.test, args.trees, args.features, args.min_leaf) < 1:
         parser.error("Use at least two replications and positive size parameters")
     args.output.mkdir(parents=True, exist_ok=True)
@@ -115,14 +123,28 @@ def main():
                            "mean_difference": mean, "paired_mcse": mcse, "reps": len(difference)})
     write_csv(args.output / "drf_smooth_summary.csv", summaries)
     write_csv(args.output / "drf_smooth_paired.csv", paired)
+    plot_results(summaries, args.output / "drf_smooth_transition.pdf")
+    write_metadata(args.output / "smooth_metadata.json", args, [__file__, Path(__file__).with_name("drf_core.py")])
+    print("Smooth-transition experiment saved.", flush=True)
 
+
+def read_summary(path):
+    """Read drf_smooth_summary.csv back into the numeric rows that plot_results expects."""
+    with open(path, newline="") as handle:
+        return [{key: value if key == "method" else float(value) for key, value in row.items()}
+                for row in csv.DictReader(handle)]
+
+
+def plot_results(summaries, path):
     report_style()
     fig, axes = plt.subplots(1, 3, figsize=(TEXT_WIDTH_IN, 2.8))
     t = np.linspace(0, 1, 400)
     for eps in EPSILONS:
         axes[0].plot(t, variance_function(t, eps), label="step" if eps == 0 else rf"$\varepsilon={eps:g}$")
     axes[0].set(xlabel=r"$x^{(1)}$", title=r"$\mathrm{Var}(Y\mid X=x)$")
-    axes[0].legend(loc="lower right", fontsize=8, handlelength=1.2, labelspacing=0.25, borderaxespad=0.3)
+    # Upper left is empty for every curve (variance is near 1 there), so the legend hides no data.
+    axes[0].legend(loc="upper left", fontsize=6.5, handlelength=1.0, handletextpad=0.4,
+                   labelspacing=0.15, borderpad=0.3, borderaxespad=0.3)
     positions = np.arange(len(EPSILONS))
     for j, method in enumerate(METHODS):
         rows = [next(r for r in summaries if r["epsilon"] == e and r["method"] == method) for e in EPSILONS]
@@ -136,10 +158,8 @@ def main():
     handles, labels = axes[1].get_legend_handles_labels()
     fig.legend(handles, labels, loc="lower center", ncol=2, frameon=False, bbox_to_anchor=(0.67, 0))
     fig.tight_layout(rect=(0, 0.1, 1, 1), w_pad=0.6)
-    fig.savefig(args.output / "drf_smooth_transition.pdf")
+    fig.savefig(path)
     plt.close(fig)
-    write_metadata(args.output / "smooth_metadata.json", args, [__file__, Path(__file__).with_name("drf_core.py")])
-    print("Smooth-transition experiment saved.", flush=True)
 
 
 if __name__ == "__main__":
