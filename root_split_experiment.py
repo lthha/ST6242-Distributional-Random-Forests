@@ -73,26 +73,47 @@ def main():
     write_csv(args.output / "drf_main_summary.csv", summarize(main_records, "n"))
     write_csv(args.output / "drf_main_paired.csv", paired_rows(main_records, "n", "CART on Y^2"))
 
+    # Bandwidth sensitivity. Large bandwidths show the limit of Proposition 2: on data, the MMD split
+    # approaches the CART-on-Y split, so both CART rules are evaluated on the same datasets.
+    bandwidths = [0.25, 0.5, 1.0, 2.0, 4.0, 8.0, 16.0, 32.0]
     rng = np.random.default_rng(args.bandwidth_seed)
-    bandwidth_records = []
+    bandwidth_records, baseline_records = [], []
     for rep in range(args.bandwidth_reps):
         x, y = sample(rng, 400)
         order, counts, thresholds = candidate_splits(x)
-        for h in [0.25, 0.5, 1.0, 2.0, 4.0]:
-            index = np.argmax(mmd_split_scores(y[order], counts, h))
+        cart_index = {"CART on Y": int(np.argmax(cart_scores(y[order], counts))),
+                      "CART on Y^2": int(np.argmax(cart_scores(y[order]**2, counts)))}
+        for method, index in cart_index.items():
+            threshold = float(thresholds[index])
+            baseline_records.append({"method": method, "rep": rep,
+                                     "threshold": threshold, "abs_error": abs(threshold - 0.5)})
+        for h in bandwidths:
+            index = int(np.argmax(mmd_split_scores(y[order], counts, h)))
             threshold = float(thresholds[index])
             bandwidth_records.append({"h": h, "rep": rep, "method": f"h={h:g}",
-                                      "threshold": threshold, "abs_error": abs(threshold - 0.5)})
+                                      "threshold": threshold, "abs_error": abs(threshold - 0.5),
+                                      "same_split_as_cart_y": index == cart_index["CART on Y"],
+                                      "same_split_as_cart_y2": index == cart_index["CART on Y^2"]})
     bandwidth_summary = summarize(bandwidth_records, "h")
-    write_csv(args.output / "drf_bandwidth_splits.csv", bandwidth_records)
-    write_csv(args.output / "drf_bandwidth_summary.csv", bandwidth_summary)
-    # Compare bandwidths on the same datasets, with h=1 as the reference.
+    for row in bandwidth_summary:
+        subset = [r for r in bandwidth_records if r["h"] == row["h"]]
+        row["same_split_as_cart_y"] = float(np.mean([r["same_split_as_cart_y"] for r in subset]))
+        row["same_split_as_cart_y2"] = float(np.mean([r["same_split_as_cart_y2"] for r in subset]))
+    baseline_summary = summarize(baseline_records, "method")
+    write_csv(args.output / "drf_bandwidth_splits.csv", bandwidth_records + baseline_records)
+    write_csv(args.output / "drf_bandwidth_summary.csv", bandwidth_summary + baseline_summary)
+    # Compare each bandwidth with h=1 and with CART on Y^2 on the same datasets.
     paired_bandwidth = []
-    reference = {r["rep"]: r["abs_error"] for r in bandwidth_records if r["h"] == 1.0}
-    for h in [0.25, 0.5, 2.0, 4.0]:
-        values = [r["abs_error"] - reference[r["rep"]] for r in bandwidth_records if r["h"] == h]
-        mean, mcse = mean_mcse(values)
-        paired_bandwidth.append({"h": h, "reference_h": 1.0, "mean_difference": mean, "paired_mcse": mcse})
+    references = {"h=1": {r["rep"]: r["abs_error"] for r in bandwidth_records if r["h"] == 1.0},
+                  "CART on Y^2": {r["rep"]: r["abs_error"] for r in baseline_records
+                                  if r["method"] == "CART on Y^2"}}
+    for name, reference in references.items():
+        for h in bandwidths:
+            if name == "h=1" and h == 1.0:
+                continue
+            values = [r["abs_error"] - reference[r["rep"]] for r in bandwidth_records if r["h"] == h]
+            mean, mcse = mean_mcse(values)
+            paired_bandwidth.append({"h": h, "reference": name, "mean_difference": mean, "paired_mcse": mcse})
     write_csv(args.output / "drf_bandwidth_paired.csv", paired_bandwidth)
 
     report_style()
@@ -123,8 +144,15 @@ def main():
 
     fig, ax = plt.subplots(figsize=(0.77*TEXT_WIDTH_IN, 2.6))
     ax.errorbar([r["h"] for r in bandwidth_summary], [r["mean_abs_error"] for r in bandwidth_summary],
-                yerr=[1.96 * r["mcse"] for r in bandwidth_summary], marker="o", capsize=3)
+                yerr=[1.96 * r["mcse"] for r in bandwidth_summary], marker="o", capsize=3, label="MMD")
+    for row, style in zip(baseline_summary, ["--", ":"]):
+        label = r"CART on $Y$" if row["method"] == "CART on Y" else r"CART on $Y^2$"
+        ax.axhline(row["mean_abs_error"], color="grey", linestyle=style, linewidth=1.2, label=label)
+    ax.set_xscale("log", base=2)
+    ax.set_xticks(bandwidths)
+    ax.set_xticklabels([f"{h:g}" for h in bandwidths])
     ax.set(xlabel=r"Gaussian bandwidth $h$", ylabel="Mean absolute split error")
+    ax.legend(loc="center left")
     fig.tight_layout()
     fig.savefig(args.output / "drf_bandwidth_sensitivity.pdf")
     plt.close(fig)
