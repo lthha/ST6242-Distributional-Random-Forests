@@ -127,6 +127,13 @@ def write_csv(path, rows):
         writer.writerows(rows)
 
 
+def read_csv_rows(path, text_fields):
+    """Read a CSV written by write_csv, converting every field not in text_fields to float."""
+    with Path(path).open(newline="") as stream:
+        return [{key: value if key in text_fields else float(value) for key, value in row.items()}
+                for row in csv.DictReader(stream)]
+
+
 def write_metadata(path, arguments, scripts):
     versions = {name: importlib.metadata.version(name)
                 for name in ["numpy", "scipy", "scikit-learn", "matplotlib", "joblib", "threadpoolctl"]}

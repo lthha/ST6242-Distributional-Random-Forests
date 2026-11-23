@@ -9,7 +9,8 @@ import numpy as np
 from scipy import stats
 from sklearn.ensemble import RandomForestRegressor
 
-from drf_core import gaussian_kernel, forest_weights, mean_mcse, write_csv, write_metadata, report_style, TEXT_WIDTH_IN
+from drf_core import (gaussian_kernel, forest_weights, mean_mcse, read_csv_rows, write_csv, write_metadata,
+                      report_style, TEXT_WIDTH_IN)
 
 SCENARIOS = ["variance", "tail", "bimodality", "dependence"]
 METHODS = ["Mean-CART", "RFF-MMD"]
@@ -191,12 +192,12 @@ def plot_forest_figures(summaries, output):
         main_ax.bar(x + (j-.5)*.38, [r["mmd_mean"] for r in rows], width=.38, color=colors[j],
                     yerr=[1.96*r["mmd_mcse"] for r in rows], capsize=2, label=method)
     main_ax.set_xticks(x, LABELS, rotation=30, ha="right", rotation_mode="anchor")
-    main_ax.set_title(r"Conditional MMD$^2$ (primary)")
+    main_ax.set_title(r"(a) Conditional MMD$^2$ (primary)")
     main_ax.set_ylim(0, 0.0235)
     main_ax.yaxis.set_major_locator(plt.MaxNLocator(5))
     main_ax.legend(loc="upper left", ncol=1)
-    titles = [r"Variance: $|\widehat{\mathrm{var}}-\mathrm{var}|$", r"Tail: $P(|Y|\leq 1)$",
-              r"Bimodality: $P(|Y|\leq 0.5)$", r"Dependence: $|\widehat{\mathrm{cov}}-\mathrm{cov}|$"]
+    titles = ["(b) Variance\n" r"$|\widehat{\mathrm{var}}-\mathrm{var}|$", "(c) Tail shape\n" r"$P(|Y|\leq 1)$",
+              "(d) Bimodality\n" r"$P(|Y|\leq 0.5)$", "(e) Dependence\n" r"$|\widehat{\mathrm{cov}}-\mathrm{cov}|$"]
     for k, (scenario, title) in enumerate(zip(SCENARIOS, titles)):
         ax = fig.add_subplot(grid[k // 2, 1 + k % 2])
         rows = [row(scenario, m) for m in METHODS]
@@ -221,8 +222,8 @@ def plot_forest_figures(summaries, output):
                     hatch="//", edgecolor=colors[j], label=f"{method}: remainder")
         axes[1].bar(offset, [r["n_eff_mean"] for r in rows], width=.38, color=colors[j],
                     yerr=[1.96*r["n_eff_mcse"] for r in rows], capsize=2)
-    axes[0].set_title(r"Conditional MMD$^2$ = bias + remainder")
-    axes[1].set_title(r"Effective sample size $1/\sum_i w_i(x)^2$")
+    axes[0].set_title(r"(a) Conditional MMD$^2$ = bias + remainder")
+    axes[1].set_title(r"(b) Effective sample size $1/\sum_i w_i(x)^2$")
     for ax in axes:
         ax.set_xticks(x, LABELS, rotation=20, ha="right", rotation_mode="anchor")
     handles, labels = axes[0].get_legend_handles_labels()
@@ -238,7 +239,14 @@ def main():
     for flag, default in [("reps", 25), ("train", 650), ("test", 360), ("trees", 180), ("features", 48), ("min-leaf", 12), ("seed", 7606242), ("jobs", 2), ("quadrature", 4096)]:
         parser.add_argument("--"+flag, type=int, default=default)
     parser.add_argument("--output", type=Path, default=Path("results"))
+    parser.add_argument("--plot-only", action="store_true",
+                        help="Redraw both figures from an existing drf_full_forest_summary.csv in --output")
     args = parser.parse_args()
+    if args.plot_only:
+        summaries = read_csv_rows(args.output / "drf_full_forest_summary.csv", {"scenario", "method"})
+        plot_forest_figures(summaries, args.output)
+        print("Full-forest figures redrawn.", flush=True)
+        return
     if args.reps < 2 or min(args.train, args.test, args.trees, args.features, args.min_leaf, args.quadrature) < 1:
         parser.error("Use at least two replications and positive size parameters")
     args.output.mkdir(parents=True, exist_ok=True)

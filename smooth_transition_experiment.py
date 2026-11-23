@@ -7,7 +7,6 @@ the design satisfies the smoothness assumption of the DRF consistency and
 inference theorems, while eps -> 0 recovers the discontinuous design.
 """
 import argparse
-import csv
 from pathlib import Path
 
 import matplotlib
@@ -16,7 +15,8 @@ import matplotlib.pyplot as plt
 import numpy as np
 from sklearn.ensemble import RandomForestRegressor
 
-from drf_core import gaussian_kernel, forest_weights, mean_mcse, write_csv, write_metadata, report_style, TEXT_WIDTH_IN
+from drf_core import (gaussian_kernel, forest_weights, mean_mcse, read_csv_rows, write_csv, write_metadata,
+                      report_style, TEXT_WIDTH_IN)
 
 METHODS = ["Mean-CART", "RFF-MMD"]
 EPSILONS = [0.0, 0.025, 0.05, 0.1, 0.2]
@@ -66,7 +66,7 @@ def main():
                         help="Redraw the figure from an existing drf_smooth_summary.csv in --output")
     args = parser.parse_args()
     if args.plot_only:
-        plot_results(read_summary(args.output / "drf_smooth_summary.csv"),
+        plot_results(read_csv_rows(args.output / "drf_smooth_summary.csv", {"method"}),
                      args.output / "drf_smooth_transition.pdf")
         print("Smooth-transition figure redrawn.", flush=True)
         return
@@ -128,20 +128,13 @@ def main():
     print("Smooth-transition experiment saved.", flush=True)
 
 
-def read_summary(path):
-    """Read drf_smooth_summary.csv back into the numeric rows that plot_results expects."""
-    with open(path, newline="") as handle:
-        return [{key: value if key == "method" else float(value) for key, value in row.items()}
-                for row in csv.DictReader(handle)]
-
-
 def plot_results(summaries, path):
     report_style()
     fig, axes = plt.subplots(1, 3, figsize=(TEXT_WIDTH_IN, 2.8))
     t = np.linspace(0, 1, 400)
     for eps in EPSILONS:
         axes[0].plot(t, variance_function(t, eps), label="step" if eps == 0 else rf"$\varepsilon={eps:g}$")
-    axes[0].set(xlabel=r"$x^{(1)}$", title=r"$\mathrm{Var}(Y\mid X=x)$")
+    axes[0].set(xlabel=r"$x^{(1)}$", title=r"(a) $\mathrm{Var}(Y\mid X=x)$")
     # Upper left is empty for every curve (variance is near 1 there), so the legend hides no data.
     axes[0].legend(loc="upper left", fontsize=6.5, handlelength=1.0, handletextpad=0.4,
                    labelspacing=0.15, borderpad=0.3, borderaxespad=0.3)
@@ -152,7 +145,7 @@ def plot_results(summaries, path):
             ax.errorbar(positions + (j-.5)*.1, [r[metric+"_mean"] for r in rows],
                         yerr=[1.96*r[metric+"_mcse"] for r in rows], marker="o", markersize=4,
                         capsize=2.5, label=method)
-    for ax, title in zip(axes[1:], [r"Conditional MMD$^2$", "Conditional-variance MAE"]):
+    for ax, title in zip(axes[1:], [r"(b) Conditional MMD$^2$", "(c) Variance MAE"]):
         ax.set_xticks(positions, ["step"] + [f"{e:g}" for e in EPSILONS[1:]])
         ax.set(xlabel=r"transition width $\varepsilon$", title=title)
     handles, labels = axes[1].get_legend_handles_labels()

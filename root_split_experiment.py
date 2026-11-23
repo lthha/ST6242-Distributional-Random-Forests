@@ -131,12 +131,12 @@ def main():
     plt.close(fig)
 
     fig, axes = plt.subplots(1, 3, figsize=(TEXT_WIDTH_IN, 2.6), sharey=True)
-    for ax, n in zip(axes, [200, 400, 800]):
+    for ax, n, letter in zip(axes, [200, 400, 800], "abc"):
         methods = ["CART on Y", "CART on Y^2", "MMD (h=1)"]
         values = [[r["threshold"] for r in main_records if r["n"] == n and r["method"] == m] for m in methods]
         ax.boxplot(values, labels=["CART\non $Y$", "CART\non $Y^2$", "MMD"], showfliers=False)
         ax.axhline(0.5, color="grey", linestyle="--", linewidth=0.8)
-        ax.set(title=f"$n={n}$", ylim=(0, 1))
+        ax.set(title=f"({letter}) $n={n}$", ylim=(0, 1))
     axes[0].set_ylabel("Estimated root split")
     fig.tight_layout()
     fig.savefig(args.output / "drf_split_boxplots.pdf")
